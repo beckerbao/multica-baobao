@@ -890,6 +890,21 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 	}
 
 	if !d.workspaceRepoAllowed(workspaceID, repoURL) {
+		// Debug escape hatch: when MODE=DEBUG, allow direct repo checkout even
+		// if the workspace-level allowlist does not include this URL yet. This
+		// is intended for local development and manual verification flows (for
+		// example validating a freshly attached project_resource outside a task
+		// claim) and should never be relied on in production.
+		if strings.EqualFold(strings.TrimSpace(os.Getenv("MODE")), "DEBUG") {
+			d.syncWorkspaceRepos(workspaceID, append(resp.Repos, RepoData{URL: repoURL}))
+			if d.repoCache.Lookup(workspaceID, repoURL) != "" {
+				return nil
+			}
+			if syncErr := d.workspaceLastRepoSyncErr(workspaceID); syncErr != "" {
+				return fmt.Errorf("debug repo checkout failed to sync: %s", syncErr)
+			}
+			return fmt.Errorf("debug repo checkout failed to sync")
+		}
 		return ErrRepoNotConfigured
 	}
 

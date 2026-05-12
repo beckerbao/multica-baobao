@@ -1146,6 +1146,28 @@ func TestEnsureRepoReadyReturnsNotConfigured(t *testing.T) {
 	}
 }
 
+func TestEnsureRepoReadyDebugModeAllowsUnconfiguredRepo(t *testing.T) {
+	// Not parallel: this test mutates process env (MODE).
+	t.Setenv("MODE", "DEBUG")
+
+	sourceRepo := createDaemonTestRepo(t)
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID:  "ws-1",
+			Repos:        []RepoData{},
+			ReposVersion: "v1",
+		})
+	})
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
+
+	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
+		t.Fatalf("expected debug mode to allow unconfigured repo, got %v", err)
+	}
+	if d.repoCache.Lookup("ws-1", sourceRepo) == "" {
+		t.Fatal("expected debug mode to sync repo into cache")
+	}
+}
+
 func TestEnsureRepoReadyReportsSyncFailure(t *testing.T) {
 	t.Parallel()
 
