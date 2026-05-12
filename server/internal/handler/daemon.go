@@ -231,6 +231,29 @@ func parseWorkspaceRepos(raw []byte) []RepoData {
 	return normalizeWorkspaceRepos(repos)
 }
 
+// projectResourceRepoURL extracts a checkout URL from project resources that
+// represent source-code repositories. It is intentionally provider-aware:
+// GitHub and GitLab share the same payload shape today (`{"url":"..."}`),
+// while unknown resource types return false and are ignored for repo checkout.
+func projectResourceRepoURL(resourceType string, raw json.RawMessage) (string, bool) {
+	switch resourceType {
+	case "github_repo", "gitlab_repo":
+	default:
+		return "", false
+	}
+	var payload struct {
+		URL string `json:"url"`
+	}
+	if json.Unmarshal(raw, &payload) != nil {
+		return "", false
+	}
+	url := strings.TrimSpace(payload.URL)
+	if url == "" {
+		return "", false
+	}
+	return url, true
+}
+
 func workspaceReposResponse(workspaceID string, raw []byte) daemonWorkspaceReposResponse {
 	repos := parseWorkspaceRepos(raw)
 	return daemonWorkspaceReposResponse{
@@ -1099,10 +1122,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	// Include workspace ID and repos so the daemon can set up worktrees.
 	//
-	// Repo precedence: project-bound github_repo resources override workspace
+	// Repo precedence: project-bound repo resources override workspace
 	// repos when present. Mixing both would just confuse the agent — if a
 	// project explicitly attached its repos, those are the authoritative set
-	// for issues inside that project. When the project has no github_repo
+	// for issues inside that project. When the project has no repo resources
 	// resources (or no project at all), we fall back to the workspace repos.
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
@@ -1131,16 +1154,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 							ResourceRef:  ref,
 							Label:        label,
 						})
-						// Lift github_repo resources into the daemon's repo list
-						// so `multica repo checkout` and the meta-skill render
-						// them as the issue's repos.
-						if row.ResourceType == "github_repo" {
-							var payload struct {
-								URL string `json:"url"`
-							}
-							if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-								projectRepos = append(projectRepos, RepoData{URL: payload.URL})
-							}
+						// Lift provider-aware repo resources into the daemon's
+						// repo list so `multica repo checkout` and the meta-skill
+						// render them as the issue's repos.
+						if repoURL, ok := projectResourceRepoURL(row.ResourceType, row.ResourceRef); ok {
+							projectRepos = append(projectRepos, RepoData{URL: repoURL})
 						}
 					}
 					resp.ProjectResources = out
@@ -1316,7 +1334,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			// and resources to the daemon so the agent has the same context
 			// it would for an issue-bound task: the prompt template can name
 			// the project, and `multica repo checkout` sees the project's
-			// github_repo resources instead of the workspace fallback.
+			// project repo resources instead of the workspace fallback.
 			var projectRepos []RepoData
 			if qc.ProjectID != "" {
 				projectUUID, err := util.ParseUUID(qc.ProjectID)
@@ -1342,13 +1360,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 								ResourceRef:  ref,
 								Label:        label,
 							})
-							if row.ResourceType == "github_repo" {
-								var payload struct {
-									URL string `json:"url"`
-								}
-								if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-									projectRepos = append(projectRepos, RepoData{URL: payload.URL})
-								}
+							if repoURL, ok := projectResourceRepoURL(row.ResourceType, row.ResourceRef); ok {
+								projectRepos = append(projectRepos, RepoData{URL: repoURL})
 							}
 						}
 						resp.ProjectResources = out

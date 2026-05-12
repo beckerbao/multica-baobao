@@ -124,11 +124,11 @@ func init() {
 	projectResourceListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 
 	// project resource add — generic shape: any --type with a JSON --ref payload
-	// works without further CLI changes. github_repo is supported via the
+	// works without further CLI changes. Repo resource types are supported via the
 	// dedicated --url / --default-branch-hint shortcuts as a convenience.
-	projectResourceAddCmd.Flags().String("type", "github_repo", "Resource type (e.g. github_repo, notion_page — see docs)")
-	projectResourceAddCmd.Flags().String("url", "", "Shortcut: the repo URL (only used when --type github_repo)")
-	projectResourceAddCmd.Flags().String("default-branch-hint", "", "Shortcut: optional default branch hint (only used when --type github_repo)")
+	projectResourceAddCmd.Flags().String("type", "github_repo", "Resource type (e.g. github_repo, gitlab_repo, notion_page — see docs)")
+	projectResourceAddCmd.Flags().String("url", "", "Shortcut: the repo URL (used when --type github_repo or --type gitlab_repo)")
+	projectResourceAddCmd.Flags().String("default-branch-hint", "", "Shortcut: optional default branch hint (used when --type github_repo or --type gitlab_repo)")
 	projectResourceAddCmd.Flags().String("ref", "", "Generic JSON resource_ref payload — overrides the per-type shortcuts when set")
 	projectResourceAddCmd.Flags().String("label", "", "Optional human-readable label")
 	projectResourceAddCmd.Flags().String("output", "json", "Output format: table or json")
@@ -533,11 +533,11 @@ func runProjectResourceAdd(cmd *cobra.Command, args []string) error {
 		body["resource_ref"] = ref
 	} else {
 		switch resourceType {
-		case "github_repo":
+		case "github_repo", "gitlab_repo":
 			urlVal, _ := cmd.Flags().GetString("url")
 			urlVal = strings.TrimSpace(urlVal)
 			if urlVal == "" {
-				return fmt.Errorf("github_repo requires --url (or pass a JSON payload via --ref)")
+				return fmt.Errorf("%s requires --url (or pass a JSON payload via --ref)", resourceType)
 			}
 			ref := map[string]any{"url": urlVal}
 			if hint, _ := cmd.Flags().GetString("default-branch-hint"); hint != "" {
@@ -612,7 +612,7 @@ func runProjectResourceRemove(cmd *cobra.Command, args []string) error {
 }
 
 // summarizeResourceRef extracts the most useful single string from a
-// resource_ref object — for github_repo this is the URL.
+// resource_ref object — for repo resources this is the URL.
 func summarizeResourceRef(raw any) string {
 	m, ok := raw.(map[string]any)
 	if !ok {
