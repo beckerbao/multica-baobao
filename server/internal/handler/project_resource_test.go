@@ -55,6 +55,25 @@ func TestProjectResourceLifecycle(t *testing.T) {
 		t.Errorf("created.ResourceRef.url = %q", ref.URL)
 	}
 
+	// Attach a gitlab_repo resource.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/projects/"+project.ID+"/resources", map[string]any{
+		"resource_type": "gitlab_repo",
+		"resource_ref":  map[string]any{"url": "https://gitlab.com/multica-ai/multica"},
+	})
+	req = withURLParam(req, "id", project.ID)
+	testHandler.CreateProjectResource(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProjectResource (gitlab): expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var gitlabCreated ProjectResourceResponse
+	if err := json.NewDecoder(w.Body).Decode(&gitlabCreated); err != nil {
+		t.Fatalf("decode CreateProjectResource (gitlab): %v", err)
+	}
+	if gitlabCreated.ResourceType != "gitlab_repo" {
+		t.Errorf("gitlabCreated.ResourceType = %q, want gitlab_repo", gitlabCreated.ResourceType)
+	}
+
 	// Listing must include the new resource.
 	w = httptest.NewRecorder()
 	req = newRequest("GET", "/api/projects/"+project.ID+"/resources", nil)
@@ -70,11 +89,18 @@ func TestProjectResourceLifecycle(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&listResp); err != nil {
 		t.Fatalf("decode list: %v", err)
 	}
-	if listResp.Total != 1 || len(listResp.Resources) != 1 {
-		t.Fatalf("list returned %d resources, want 1", listResp.Total)
+	if listResp.Total != 2 || len(listResp.Resources) != 2 {
+		t.Fatalf("list returned %d resources, want 2", listResp.Total)
 	}
-	if listResp.Resources[0].ID != created.ID {
-		t.Errorf("list[0].ID = %q, want %q", listResp.Resources[0].ID, created.ID)
+	seen := map[string]bool{}
+	for _, res := range listResp.Resources {
+		seen[res.ID] = true
+	}
+	if !seen[created.ID] {
+		t.Errorf("list missing github resource id=%q", created.ID)
+	}
+	if !seen[gitlabCreated.ID] {
+		t.Errorf("list missing gitlab resource id=%q", gitlabCreated.ID)
 	}
 
 	// Duplicate attach must conflict (UNIQUE on project_id + type + ref).
@@ -101,6 +127,18 @@ func TestProjectResourceLifecycle(t *testing.T) {
 		t.Errorf("invalid URL: expected 400, got %d: %s", w.Code, w.Body.String())
 	}
 
+	// Invalid GitLab URL must reject at the validator level.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/projects/"+project.ID+"/resources", map[string]any{
+		"resource_type": "gitlab_repo",
+		"resource_ref":  map[string]any{"url": "not-a-url"},
+	})
+	req = withURLParam(req, "id", project.ID)
+	testHandler.CreateProjectResource(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("invalid gitlab URL: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
 	// Unknown resource_type must reject.
 	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/projects/"+project.ID+"/resources", map[string]any{
@@ -120,6 +158,15 @@ func TestProjectResourceLifecycle(t *testing.T) {
 	testHandler.DeleteProjectResource(w, req)
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("DeleteProjectResource: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Delete the GitLab resource as well.
+	w = httptest.NewRecorder()
+	req = newRequest("DELETE", "/api/projects/"+project.ID+"/resources/"+gitlabCreated.ID, nil)
+	req = withURLParams(req, "id", project.ID, "resourceId", gitlabCreated.ID)
+	testHandler.DeleteProjectResource(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteProjectResource (gitlab): expected 204, got %d: %s", w.Code, w.Body.String())
 	}
 
 	// After deletion the list should be empty.
@@ -341,4 +388,3 @@ func TestCreateProjectRollsBackOnInvalidResource(t *testing.T) {
 		}
 	}
 }
-

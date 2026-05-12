@@ -65,6 +65,8 @@ func validateAndNormalizeResourceRef(resourceType string, ref json.RawMessage) (
 	switch resourceType {
 	case "github_repo":
 		return validateGithubRepoRef(ref)
+	case "gitlab_repo":
+		return validateGitlabRepoRef(ref)
 	default:
 		return nil, fmt.Errorf("unknown resource_type %q", resourceType)
 	}
@@ -73,6 +75,11 @@ func validateAndNormalizeResourceRef(resourceType string, ref json.RawMessage) (
 type githubRepoRef struct {
 	URL                string `json:"url"`
 	DefaultBranchHint  string `json:"default_branch_hint,omitempty"`
+}
+
+type gitlabRepoRef struct {
+	URL               string `json:"url"`
+	DefaultBranchHint string `json:"default_branch_hint,omitempty"`
 }
 
 func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
@@ -86,6 +93,26 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 	}
 	if u, err := url.Parse(payload.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, errors.New("github_repo: url must be a valid http(s) URL")
+	}
+	payload.DefaultBranchHint = strings.TrimSpace(payload.DefaultBranchHint)
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func validateGitlabRepoRef(ref json.RawMessage) (json.RawMessage, error) {
+	var payload gitlabRepoRef
+	if err := json.Unmarshal(ref, &payload); err != nil {
+		return nil, fmt.Errorf("invalid gitlab_repo payload: %w", err)
+	}
+	payload.URL = strings.TrimSpace(payload.URL)
+	if payload.URL == "" {
+		return nil, errors.New("gitlab_repo: url is required")
+	}
+	if u, err := url.Parse(payload.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, errors.New("gitlab_repo: url must be a valid http(s) URL")
 	}
 	payload.DefaultBranchHint = strings.TrimSpace(payload.DefaultBranchHint)
 	out, err := json.Marshal(payload)

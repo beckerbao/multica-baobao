@@ -1,0 +1,31 @@
+# PostgreSQL-only Compose file for local development.
+#
+# Use this when you want to run the database in Docker but start the
+# frontend and backend directly from source on your machine.
+#
+# Usage:
+#   docker compose -f docker-compose.postgres.yml up -d
+#   docker compose -f docker-compose.postgres.yml down
+
+name: multica
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-multica}
+      POSTGRES_USER: ${POSTGRES_USER:-multica}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-multica}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-multica} -d ${POSTGRES_DB:-multica}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
