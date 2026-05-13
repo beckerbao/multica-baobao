@@ -2082,6 +2082,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"MULTICA_TASK_ID":      task.ID,
 		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
 	}
+	if task.PreferredWorkDir != "" {
+		agentEnv["MULTICA_PREFERRED_WORKDIR"] = task.PreferredWorkDir
+	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
 	}
@@ -2135,6 +2138,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	taskLog.Info("starting agent",
 		"provider", provider,
 		"workdir", env.WorkDir,
+		"preferred_workdir", task.PreferredWorkDir,
+		"preferred_workdir_enabled", task.PreferredWorkDir != "",
 		"model", entry.Model,
 		"reused", reused,
 	)

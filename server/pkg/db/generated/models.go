@@ -444,6 +444,17 @@ type Project struct {
 	Priority    string             `json:"priority"`
 }
 
+type ProjectLocalRepoPath struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	DaemonID    string             `json:"daemon_id"`
+	LocalPath   string             `json:"local_path"`
+	BranchHint  pgtype.Text        `json:"branch_hint"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ProjectResource struct {
 	ID           pgtype.UUID        `json:"id"`
 	ProjectID    pgtype.UUID        `json:"project_id"`

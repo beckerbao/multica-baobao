@@ -7,6 +7,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -48,6 +51,14 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	workDir, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("get working directory: %w", err)
+	}
+	if preferred := os.Getenv("MULTICA_PREFERRED_WORKDIR"); preferred != "" {
+		if selected, reason, ok := resolvePreferredWorkDir(preferred); ok {
+			workDir = selected
+			fmt.Fprintf(os.Stderr, "Using preferred local path: %s\n", workDir)
+		} else {
+			fmt.Fprintf(os.Stderr, "Preferred local path unavailable (%s); fallback to task workdir: %s\n", reason, workDir)
+		}
 	}
 
 	reqBody := map[string]string{
@@ -93,4 +104,35 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(os.Stderr, "Checked out %s → %s (branch: %s)\n", repoURL, result.Path, result.BranchName)
 
 	return nil
+}
+
+func resolvePreferredWorkDir(preferred string) (string, string, bool) {
+	p := filepath.Clean(strings.TrimSpace(preferred))
+	if p == "" {
+		return "", "empty path", false
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", "path does not exist", false
+		}
+		if os.IsPermission(err) {
+			return "", "permission denied", false
+		}
+		return "", err.Error(), false
+	}
+	if !info.IsDir() {
+		return "", "path is not a directory", false
+	}
+	if _, err := os.ReadDir(p); err != nil {
+		if os.IsPermission(err) {
+			return "", "permission denied", false
+		}
+		return "", err.Error(), false
+	}
+	gitCheck := exec.Command("git", "-C", p, "rev-parse", "--is-inside-work-tree")
+	if err := gitCheck.Run(); err != nil {
+		return "", "path is not a git repository", false
+	}
+	return p, "", true
 }

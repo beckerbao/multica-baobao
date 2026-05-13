@@ -389,6 +389,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/resources", h.ListProjectResources)
 					r.Post("/resources", h.CreateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+					r.Get("/local-repo-paths", h.ListProjectLocalRepoPaths)
+					r.Post("/local-repo-paths", h.UpsertProjectLocalRepoPath)
+					r.Delete("/local-repo-paths/{daemonId}", h.DeleteProjectLocalRepoPath)
 				})
 			})
 

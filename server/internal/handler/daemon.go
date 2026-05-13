@@ -254,6 +254,29 @@ func projectResourceRepoURL(resourceType string, raw json.RawMessage) (string, b
 	return url, true
 }
 
+func (h *Handler) loadPreferredProjectWorkDir(ctx context.Context, workspaceID, projectID pgtype.UUID, daemonID string) (string, bool) {
+	daemonID = strings.TrimSpace(daemonID)
+	if daemonID == "" {
+		return "", false
+	}
+	row, err := h.Queries.GetProjectLocalRepoPathByProjectAndDaemon(ctx, db.GetProjectLocalRepoPathByProjectAndDaemonParams{
+		WorkspaceID: workspaceID,
+		ProjectID:   projectID,
+		DaemonID:    daemonID,
+	})
+	if err != nil {
+		if !isNotFound(err) {
+			slog.Warn("claim task: load preferred project workdir failed", "daemon_id", daemonID, "error", err)
+		}
+		return "", false
+	}
+	localPath := strings.TrimSpace(row.LocalPath)
+	if localPath == "" {
+		return "", false
+	}
+	return localPath, true
+}
+
 func workspaceReposResponse(workspaceID string, raw []byte) daemonWorkspaceReposResponse {
 	repos := parseWorkspaceRepos(raw)
 	return daemonWorkspaceReposResponse{
@@ -1136,6 +1159,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				resp.ProjectID = uuidToString(issue.ProjectID)
 				if proj, err := h.Queries.GetProject(r.Context(), issue.ProjectID); err == nil {
 					resp.ProjectTitle = proj.Title
+				}
+				if runtime.DaemonID.Valid {
+					if localPath, ok := h.loadPreferredProjectWorkDir(r.Context(), issue.WorkspaceID, issue.ProjectID, runtime.DaemonID.String); ok {
+						resp.PreferredWorkDir = localPath
+					}
 				}
 				if rows := h.listProjectResourcesForProject(r.Context(), issue.ProjectID); len(rows) > 0 {
 					out := make([]ProjectResourceData, 0, len(rows))
