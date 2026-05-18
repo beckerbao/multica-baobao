@@ -82,3 +82,25 @@ export interface ListProjectResourcesResponse {
   resources: ProjectResource[];
   total: number;
 }
+
+export interface ProjectLocalRepoPath {
+  id: string;
+  workspace_id: string;
+  project_id: string;
+  daemon_id: string;
+  local_path: string;
+  branch_hint: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpsertProjectLocalRepoPathRequest {
+  daemon_id: string;
+  local_path: string;
+  branch_hint?: string;
+}
+
+export interface ListProjectLocalRepoPathsResponse {
+  items: ProjectLocalRepoPath[];
+  total: number;
+}

@@ -59,6 +59,9 @@ import type {
   ProjectResource,
   CreateProjectResourceRequest,
   ListProjectResourcesResponse,
+  ProjectLocalRepoPath,
+  UpsertProjectLocalRepoPathRequest,
+  ListProjectLocalRepoPathsResponse,
   Label,
   CreateLabelRequest,
   UpdateLabelRequest,
@@ -1185,6 +1188,32 @@ export class ApiClient {
     resourceId: string,
   ): Promise<void> {
     await this.fetch(`/api/projects/${projectId}/resources/${resourceId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // Project local repo paths
+  async listProjectLocalRepoPaths(
+    projectId: string,
+  ): Promise<ListProjectLocalRepoPathsResponse> {
+    return this.fetch(`/api/projects/${projectId}/local-repo-paths`);
+  }
+
+  async upsertProjectLocalRepoPath(
+    projectId: string,
+    data: UpsertProjectLocalRepoPathRequest,
+  ): Promise<ProjectLocalRepoPath> {
+    return this.fetch(`/api/projects/${projectId}/local-repo-paths`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteProjectLocalRepoPath(
+    projectId: string,
+    daemonId: string,
+  ): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/local-repo-paths/${encodeURIComponent(daemonId)}`, {
       method: "DELETE",
     });
   }

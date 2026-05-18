@@ -34,9 +34,9 @@
 - [x] Thêm test daemon cho cả local-path success và fallback flow.
 
 ## 5. CLI and UX
-- [ ] Thêm CLI command để set/get local path mapping theo project + daemon.
-- [ ] Thêm output rõ daemon nào đang map path nào.
-- [ ] Thêm cảnh báo khi path chưa tồn tại trên host.
+- [x] Thêm CLI command để set/get local path mapping theo project + daemon.
+- [x] Thêm output rõ daemon nào đang map path nào.
+- [x] Thêm cảnh báo khi path chưa tồn tại trên host.
 - [ ] (Optional) Thêm nút/config trong UI project settings.
 
 ## 6. Security and Safety
@@ -61,6 +61,23 @@
 - [ ] Viết docs cấu hình local path theo daemon host.
 - [ ] Viết troubleshooting: path không tồn tại, quyền folder, branch mismatch.
 - [ ] Viết guideline team multi-host (mỗi host có path khác nhau).
+
+## 9.1 CLI Rollout Notes (Production)
+- [2026-05-13] Sau khi thêm command `multica project local-path ...`, cần phát hành CLI mới; binary cũ (đặc biệt bản cài qua Homebrew) sẽ không có command này.
+- [2026-05-13] Với build local từ source (không qua CI release), `multica version` thường hiện `dev (commit: unknown, built: unknown)` do chưa inject ldflags; đây là hành vi bình thường.
+- [2026-05-13] Production cần build/release CLI với metadata version/commit/date (ldflags trong pipeline release) để truy vết chính xác.
+- [2026-05-13] Máy đã cài Homebrew: không cần gỡ bản cũ; chỉ cần đảm bảo PATH trỏ đúng binary mới khi rollout (hoặc `brew upgrade` sau khi có release chính thức).
+- [2026-05-13] Hướng dẫn PATH cụ thể:
+  - Kiểm tra binary đang dùng: `which multica`.
+  - Nếu dùng bản local từ `go install`, thêm vào shell rc (ví dụ `~/.zshrc`): `export PATH="$HOME/go/bin:$PATH"` để `$HOME/go/bin` đứng trước Homebrew path.
+  - Reload shell: `source ~/.zshrc` (hoặc mở terminal mới), rồi kiểm tra lại `which multica`.
+  - Kỳ vọng khi dùng bản local: `which multica` trả về dạng `/Users/<user>/go/bin/multica`.
+  - Nếu muốn quay lại bản Homebrew, đảo thứ tự PATH để `/opt/homebrew/bin` ưu tiên hơn `$HOME/go/bin`.
+- [2026-05-13] Checklist verify sau rollout:
+  - `which multica` trỏ đúng binary mong muốn.
+  - `multica version` hiển thị version release đúng kỳ vọng.
+  - `multica project local-path --help` hiển thị đủ subcommands `list/get/set/remove`.
+  - Chạy smoke test: `multica project local-path list <project-id>` thành công trên workspace thật.
 
 ## 10. Acceptance Criteria
 - [ ] Agent có thể vào đúng folder local đã map theo daemon host và chạy git pull/checkout.

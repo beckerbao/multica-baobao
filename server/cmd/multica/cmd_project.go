@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -85,6 +86,39 @@ var projectResourceRemoveCmd = &cobra.Command{
 	RunE:  runProjectResourceRemove,
 }
 
+var projectLocalPathCmd = &cobra.Command{
+	Use:   "local-path",
+	Short: "Manage daemon-local repository paths for a project",
+}
+
+var projectLocalPathListCmd = &cobra.Command{
+	Use:   "list <project-id>",
+	Short: "List local path mappings for a project",
+	Args:  exactArgs(1),
+	RunE:  runProjectLocalPathList,
+}
+
+var projectLocalPathSetCmd = &cobra.Command{
+	Use:   "set <project-id>",
+	Short: "Set or update a local path mapping for a daemon",
+	Args:  exactArgs(1),
+	RunE:  runProjectLocalPathSet,
+}
+
+var projectLocalPathGetCmd = &cobra.Command{
+	Use:   "get <project-id>",
+	Short: "Get local path mapping for one daemon",
+	Args:  exactArgs(1),
+	RunE:  runProjectLocalPathGet,
+}
+
+var projectLocalPathRemoveCmd = &cobra.Command{
+	Use:   "remove <project-id>",
+	Short: "Remove local path mapping for one daemon",
+	Args:  exactArgs(1),
+	RunE:  runProjectLocalPathRemove,
+}
+
 var validProjectStatuses = []string{
 	"planned", "in_progress", "paused", "completed", "cancelled",
 }
@@ -97,10 +131,15 @@ func init() {
 	projectCmd.AddCommand(projectDeleteCmd)
 	projectCmd.AddCommand(projectStatusCmd)
 	projectCmd.AddCommand(projectResourceCmd)
+	projectCmd.AddCommand(projectLocalPathCmd)
 
 	projectResourceCmd.AddCommand(projectResourceListCmd)
 	projectResourceCmd.AddCommand(projectResourceAddCmd)
 	projectResourceCmd.AddCommand(projectResourceRemoveCmd)
+	projectLocalPathCmd.AddCommand(projectLocalPathListCmd)
+	projectLocalPathCmd.AddCommand(projectLocalPathSetCmd)
+	projectLocalPathCmd.AddCommand(projectLocalPathGetCmd)
+	projectLocalPathCmd.AddCommand(projectLocalPathRemoveCmd)
 
 	// project list
 	projectListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -135,6 +174,19 @@ func init() {
 
 	// project resource remove
 	projectResourceRemoveCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// project local-path list
+	projectLocalPathListCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// project local-path set/get/remove
+	projectLocalPathSetCmd.Flags().String("daemon-id", "", "Daemon ID (required)")
+	projectLocalPathSetCmd.Flags().String("path", "", "Absolute local repository path on daemon host (required)")
+	projectLocalPathSetCmd.Flags().String("branch-hint", "", "Optional default branch hint")
+	projectLocalPathSetCmd.Flags().String("output", "json", "Output format: table or json")
+	projectLocalPathGetCmd.Flags().String("daemon-id", "", "Daemon ID (required)")
+	projectLocalPathGetCmd.Flags().String("output", "json", "Output format: table or json")
+	projectLocalPathRemoveCmd.Flags().String("daemon-id", "", "Daemon ID (required)")
+	projectLocalPathRemoveCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// project update
 	projectUpdateCmd.Flags().String("title", "", "New title")
@@ -625,6 +677,200 @@ func summarizeResourceRef(raw any) string {
 		return string(data)
 	}
 	return ""
+}
+
+// ---------------------------------------------------------------------------
+// Project local-path commands
+// ---------------------------------------------------------------------------
+
+type projectLocalRepoPathItem struct {
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	ProjectID   string `json:"project_id"`
+	DaemonID    string `json:"daemon_id"`
+	LocalPath   string `json:"local_path"`
+	BranchHint  string `json:"branch_hint"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
+func runProjectLocalPathList(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
+	var result struct {
+		Items []projectLocalRepoPathItem `json:"items"`
+		Total int                        `json:"total"`
+	}
+	if err := client.GetJSON(ctx, "/api/projects/"+projectRef.ID+"/local-repo-paths", &result); err != nil {
+		return fmt.Errorf("list local paths: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result.Items)
+	}
+
+	headers := []string{"DAEMON_ID", "LOCAL_PATH", "BRANCH_HINT", "UPDATED"}
+	rows := make([][]string, 0, len(result.Items))
+	for _, item := range result.Items {
+		rows = append(rows, []string{
+			item.DaemonID,
+			item.LocalPath,
+			item.BranchHint,
+			shortDate(item.UpdatedAt),
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runProjectLocalPathSet(cmd *cobra.Command, args []string) error {
+	daemonID, _ := cmd.Flags().GetString("daemon-id")
+	daemonID = strings.TrimSpace(daemonID)
+	if daemonID == "" {
+		return fmt.Errorf("--daemon-id is required")
+	}
+	localPath, _ := cmd.Flags().GetString("path")
+	localPath = filepath.Clean(strings.TrimSpace(localPath))
+	if localPath == "" {
+		return fmt.Errorf("--path is required")
+	}
+	if !filepath.IsAbs(localPath) {
+		return fmt.Errorf("--path must be an absolute path")
+	}
+	if _, err := os.Stat(localPath); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: local path does not exist on this host: %s\n", localPath)
+	}
+
+	body := map[string]any{
+		"daemon_id":  daemonID,
+		"local_path": localPath,
+	}
+	if branchHint, _ := cmd.Flags().GetString("branch-hint"); strings.TrimSpace(branchHint) != "" {
+		body["branch_hint"] = strings.TrimSpace(branchHint)
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
+	var result projectLocalRepoPathItem
+	if err := client.PostJSON(ctx, "/api/projects/"+projectRef.ID+"/local-repo-paths", body, &result); err != nil {
+		return fmt.Errorf("set local path: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		headers := []string{"DAEMON_ID", "LOCAL_PATH", "BRANCH_HINT"}
+		cli.PrintTable(os.Stdout, headers, [][]string{{result.DaemonID, result.LocalPath, result.BranchHint}})
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
+func runProjectLocalPathGet(cmd *cobra.Command, args []string) error {
+	daemonID, _ := cmd.Flags().GetString("daemon-id")
+	daemonID = strings.TrimSpace(daemonID)
+	if daemonID == "" {
+		return fmt.Errorf("--daemon-id is required")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
+	var result struct {
+		Items []projectLocalRepoPathItem `json:"items"`
+	}
+	if err := client.GetJSON(ctx, "/api/projects/"+projectRef.ID+"/local-repo-paths", &result); err != nil {
+		return fmt.Errorf("list local paths: %w", err)
+	}
+
+	var found *projectLocalRepoPathItem
+	for i := range result.Items {
+		if result.Items[i].DaemonID == daemonID {
+			found = &result.Items[i]
+			break
+		}
+	}
+	if found == nil {
+		return fmt.Errorf("no local path mapping found for daemon_id %q", daemonID)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		headers := []string{"DAEMON_ID", "LOCAL_PATH", "BRANCH_HINT", "UPDATED"}
+		cli.PrintTable(os.Stdout, headers, [][]string{{found.DaemonID, found.LocalPath, found.BranchHint, shortDate(found.UpdatedAt)}})
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, found)
+}
+
+func runProjectLocalPathRemove(cmd *cobra.Command, args []string) error {
+	daemonID, _ := cmd.Flags().GetString("daemon-id")
+	daemonID = strings.TrimSpace(daemonID)
+	if daemonID == "" {
+		return fmt.Errorf("--daemon-id is required")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+	if err := client.DeleteJSON(ctx, "/api/projects/"+projectRef.ID+"/local-repo-paths/"+url.PathEscape(daemonID)); err != nil {
+		return fmt.Errorf("remove local path: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, map[string]any{
+			"project_id": projectRef.ID,
+			"daemon_id":  daemonID,
+			"removed":    true,
+		})
+	}
+	fmt.Fprintf(os.Stderr, "Local path mapping removed for daemon %s in project %s.\n", daemonID, projectRef.Display)
+	return nil
+}
+
+func shortDate(v string) string {
+	if len(v) >= 10 {
+		return v[:10]
+	}
+	return v
 }
 
 // ---------------------------------------------------------------------------
