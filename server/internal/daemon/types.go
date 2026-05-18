@@ -108,6 +108,26 @@ type TaskUsageEntry struct {
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
 }
 
+type TaskChangeFile struct {
+	Path   string `json:"path"`
+	Status string `json:"status"`
+}
+
+type TaskDiffStat struct {
+	FilesChanged int `json:"files_changed"`
+	Insertions   int `json:"insertions"`
+	Deletions    int `json:"deletions"`
+}
+
+type TaskChangeSummary struct {
+	CollectStatus string           `json:"collect_status"` // ok | git_unavailable | truncated | error
+	GitBranch     string           `json:"git_branch,omitempty"`
+	HeadBefore    string           `json:"head_before,omitempty"`
+	HeadAfter     string           `json:"head_after,omitempty"`
+	ChangedFiles  []TaskChangeFile `json:"changed_files,omitempty"`
+	DiffStat      TaskDiffStat     `json:"diff_stat"`
+}
+
 // TaskResult is the outcome of executing a task.
 type TaskResult struct {
 	Status        string           `json:"status"`
@@ -116,6 +136,8 @@ type TaskResult struct {
 	EnvType       string           `json:"env_type,omitempty"`
 	SessionID     string           `json:"session_id,omitempty"` // Claude session ID for future resumption
 	WorkDir       string           `json:"work_dir,omitempty"`   // working directory used during execution
+	ExecutionWorkDir string        `json:"execution_workdir,omitempty"` // actual cwd used by agent execution
+	ChangeSummary *TaskChangeSummary `json:"change_summary,omitempty"` // best-effort git summary
 	EnvRoot       string           `json:"-"`                    // env root dir for writing GC metadata (not sent to server)
 	FailureReason string           `json:"-"`                    // classifier forwarded to FailTask on the blocked path; empty falls back to 'agent_error'
 	Usage         []TaskUsageEntry `json:"usage,omitempty"`      // per-model token usage

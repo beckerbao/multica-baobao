@@ -96,6 +96,9 @@ type Daemon struct {
 	restartBinary string             // non-empty after a successful update; path to the new binary
 	updating      atomic.Bool        // prevents concurrent update attempts
 	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
+	changeSummaryTotal          atomic.Int64
+	changeSummaryGitUnavailable atomic.Int64
+	changeSummaryError          atomic.Int64
 
 	activeEnvRootsMu sync.Mutex
 	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
@@ -1892,9 +1895,9 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 	switch result.Status {
 	case "completed":
 		taskLog.Info("task completed", "status", result.Status)
-		if err := d.client.CompleteTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir); err != nil {
+		if err := d.client.CompleteTaskWithMeta(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir, result.ExecutionWorkDir, result.ChangeSummary); err != nil {
 			taskLog.Error("complete task failed, falling back to fail", "error", err)
-			if failErr := d.client.FailTask(ctx, taskID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, "agent_error"); failErr != nil {
+			if failErr := d.client.FailTaskWithMeta(ctx, taskID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, "agent_error", result.ExecutionWorkDir, result.ChangeSummary); failErr != nil {
 				taskLog.Error("fail task fallback also failed", "error", failErr)
 			}
 		}
@@ -1908,7 +1911,7 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			}
 		}
 		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
-		if err := d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
+		if err := d.client.FailTaskWithMeta(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason, result.ExecutionWorkDir, result.ChangeSummary); err != nil {
 			taskLog.Error("report failed task failed", "error", err)
 		}
 	}
@@ -2229,6 +2232,24 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 
 	elapsed := time.Since(taskStart).Round(time.Second)
+	changeSummary := collectTaskChangeSummary(execWorkDir)
+	if changeSummary != nil {
+		d.changeSummaryTotal.Add(1)
+		switch changeSummary.CollectStatus {
+		case "git_unavailable":
+			d.changeSummaryGitUnavailable.Add(1)
+		case "error":
+			d.changeSummaryError.Add(1)
+		}
+		taskLog.Info("task change summary collected",
+			"repo_path", execWorkDir,
+			"collect_status", changeSummary.CollectStatus,
+			"changed_files", len(changeSummary.ChangedFiles),
+			"metric_total", d.changeSummaryTotal.Load(),
+			"metric_git_unavailable", d.changeSummaryGitUnavailable.Load(),
+			"metric_error", d.changeSummaryError.Load(),
+		)
+	}
 	taskLog.Info("agent finished",
 		"status", result.Status,
 		"duration", elapsed.String(),
@@ -2262,6 +2283,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				Comment:   fmt.Sprintf("%s returned empty output", provider),
 				SessionID: result.SessionID,
 				WorkDir:   env.WorkDir,
+				ExecutionWorkDir: execWorkDir,
+				ChangeSummary: changeSummary,
 				EnvRoot:   env.RootDir,
 				Usage:     usageEntries,
 			}, nil
@@ -2282,6 +2305,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				Comment:       result.Output,
 				SessionID:     result.SessionID,
 				WorkDir:       env.WorkDir,
+				ExecutionWorkDir: execWorkDir,
+				ChangeSummary: changeSummary,
 				EnvRoot:       env.RootDir,
 				Usage:         usageEntries,
 				FailureReason: reason,
@@ -2292,6 +2317,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Comment:   result.Output,
 			SessionID: result.SessionID,
 			WorkDir:   env.WorkDir,
+			ExecutionWorkDir: execWorkDir,
+			ChangeSummary: changeSummary,
 			EnvRoot:   env.RootDir,
 			Usage:     usageEntries,
 		}, nil
@@ -2309,6 +2336,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Comment:       comment,
 			SessionID:     result.SessionID,
 			WorkDir:       env.WorkDir,
+			ExecutionWorkDir: execWorkDir,
+			ChangeSummary: changeSummary,
 			EnvRoot:       env.RootDir,
 			FailureReason: "timeout",
 			Usage:         usageEntries,
@@ -2324,6 +2353,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Comment:   "task cancelled by server",
 			SessionID: result.SessionID,
 			WorkDir:   env.WorkDir,
+			ExecutionWorkDir: execWorkDir,
+			ChangeSummary: changeSummary,
 			EnvRoot:   env.RootDir,
 			Usage:     usageEntries,
 		}, nil
@@ -2355,6 +2386,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Comment:       errMsg,
 			SessionID:     result.SessionID,
 			WorkDir:       env.WorkDir,
+			ExecutionWorkDir: execWorkDir,
+			ChangeSummary: changeSummary,
 			EnvRoot:       env.RootDir,
 			Usage:         usageEntries,
 			FailureReason: failureReason,

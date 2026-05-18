@@ -194,6 +194,26 @@ func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, s
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, nil)
 }
 
+func (c *Client) CompleteTaskWithMeta(ctx context.Context, taskID, output, branchName, sessionID, workDir, executionWorkDir string, changeSummary *TaskChangeSummary) error {
+	body := map[string]any{"output": output}
+	if branchName != "" {
+		body["branch_name"] = branchName
+	}
+	if sessionID != "" {
+		body["session_id"] = sessionID
+	}
+	if workDir != "" {
+		body["work_dir"] = workDir
+	}
+	if executionWorkDir != "" {
+		body["execution_workdir"] = executionWorkDir
+	}
+	if changeSummary != nil {
+		body["change_summary"] = changeSummary
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, nil)
+}
+
 func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []TaskUsageEntry) error {
 	if len(usage) == 0 {
 		return nil
@@ -213,6 +233,26 @@ func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDi
 	}
 	if failureReason != "" {
 		body["failure_reason"] = failureReason
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", taskID), body, nil)
+}
+
+func (c *Client) FailTaskWithMeta(ctx context.Context, taskID, errMsg, sessionID, workDir, failureReason, executionWorkDir string, changeSummary *TaskChangeSummary) error {
+	body := map[string]any{"error": errMsg}
+	if sessionID != "" {
+		body["session_id"] = sessionID
+	}
+	if workDir != "" {
+		body["work_dir"] = workDir
+	}
+	if failureReason != "" {
+		body["failure_reason"] = failureReason
+	}
+	if executionWorkDir != "" {
+		body["execution_workdir"] = executionWorkDir
+	}
+	if changeSummary != nil {
+		body["change_summary"] = changeSummary
 	}
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", taskID), body, nil)
 }

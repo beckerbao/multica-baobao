@@ -237,7 +237,16 @@
     "status_running": "Working",
     "status_completed": "Completed",
     "status_failed": "Failed",
-    "status_cancelled": "Cancelled"
+    "status_cancelled": "Cancelled",
+    "code_changes_title": "Code Changes",
+    "execution_folder_label": "Execution folder",
+    "branch_label": "Branch",
+    "diff_stat_label": "Diff stat",
+    "git_unavailable": "Git metadata unavailable for this task.",
+    "collect_error": "Failed to collect git metadata.",
+    "truncated_hint": "Change list truncated due to size limits.",
+    "no_changes": "No file changes detected.",
+    "copy_label": "Copy"
   },
   "terminate_dialog": {
     "title": "Stop this task?",

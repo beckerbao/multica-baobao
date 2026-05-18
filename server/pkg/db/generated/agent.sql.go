@@ -946,9 +946,10 @@ UPDATE agent_task_queue
 SET status = 'failed',
     completed_at = now(),
     error = $2,
-    failure_reason = COALESCE($3, 'agent_error'),
-    session_id = COALESCE($4, session_id),
-    work_dir = COALESCE($5, work_dir)
+    result = COALESCE($3, result),
+    failure_reason = COALESCE($4, 'agent_error'),
+    session_id = COALESCE($5, session_id),
+    work_dir = COALESCE($6, work_dir)
 WHERE id = $1 AND status IN ('dispatched', 'running')
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session
 `
@@ -956,6 +957,7 @@ RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, c
 type FailAgentTaskParams struct {
 	ID            pgtype.UUID `json:"id"`
 	Error         pgtype.Text `json:"error"`
+	Result        []byte      `json:"result"`
 	FailureReason pgtype.Text `json:"failure_reason"`
 	SessionID     pgtype.Text `json:"session_id"`
 	WorkDir       pgtype.Text `json:"work_dir"`
@@ -974,6 +976,7 @@ func (q *Queries) FailAgentTask(ctx context.Context, arg FailAgentTaskParams) (A
 	row := q.db.QueryRow(ctx, failAgentTask,
 		arg.ID,
 		arg.Error,
+		arg.Result,
 		arg.FailureReason,
 		arg.SessionID,
 		arg.WorkDir,

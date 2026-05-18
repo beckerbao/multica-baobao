@@ -57,6 +57,21 @@ interface ExecutionLogSectionProps {
   issueId: string;
 }
 
+type ChangeFile = { path: string; status: string };
+type DiffStat = { files_changed: number; insertions: number; deletions: number };
+type ChangeSummary = {
+  collect_status: "ok" | "git_unavailable" | "truncated" | "error";
+  git_branch?: string;
+  head_before?: string;
+  head_after?: string;
+  changed_files?: ChangeFile[];
+  diff_stat?: DiffStat;
+};
+type TaskResultWithChanges = {
+  execution_workdir?: string;
+  change_summary?: ChangeSummary;
+};
+
 // Past-runs sort priority: failed first (needs attention), then
 // cancelled (procedural noise), then completed (the boring 'done'
 // case sinks to the bottom). Within each group, newest first.
@@ -350,6 +365,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   // (not necessarily this row's agent) — clicking retry on a row whose
   // agent has since been reassigned will rerun under the new assignee.
   const canRetry = task.status === "failed" || task.status === "cancelled";
+  const changeData = extractTaskChangeData(task.result);
 
   const handleRetry = async () => {
     if (retrying) return;
@@ -367,38 +383,41 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   };
 
   return (
-    <RowShell task={task}>
-      <TriggerText text={trigger} />
-      <span className="shrink-0 whitespace-nowrap text-xs">
-        <span className={tone}>{failureLabel ?? label}</span>
-        <span className="text-muted-foreground"> · {time}</span>
-      </span>
-      <RowActions>
-        <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
-        {canRetry && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  onClick={handleRetry}
-                  disabled={retrying}
-                  aria-label={t(($) => $.execution_log.retry_task_aria)}
-                />
-              }
-              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {retrying ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RotateCcw className="h-3.5 w-3.5" />
-              )}
-            </TooltipTrigger>
-            <TooltipContent>{t(($) => $.execution_log.retry_task_tooltip)}</TooltipContent>
-          </Tooltip>
-        )}
-      </RowActions>
-    </RowShell>
+    <div className="space-y-1">
+      <RowShell task={task}>
+        <TriggerText text={trigger} />
+        <span className="shrink-0 whitespace-nowrap text-xs">
+          <span className={tone}>{failureLabel ?? label}</span>
+          <span className="text-muted-foreground"> · {time}</span>
+        </span>
+        <RowActions>
+          <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
+          {canRetry && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    onClick={handleRetry}
+                    disabled={retrying}
+                    aria-label={t(($) => $.execution_log.retry_task_aria)}
+                  />
+                }
+                className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {retrying ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-3.5 w-3.5" />
+                )}
+              </TooltipTrigger>
+              <TooltipContent>{t(($) => $.execution_log.retry_task_tooltip)}</TooltipContent>
+            </Tooltip>
+          )}
+        </RowActions>
+      </RowShell>
+      <CodeChangesSummary data={changeData} />
+    </div>
   );
 }
 
@@ -467,4 +486,147 @@ function RowActions({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
+}
+
+function CodeChangesSummary({ data }: { data: TaskResultWithChanges | null }) {
+  const { t } = useT("issues");
+  if (!data) return null;
+  const summary = data.change_summary;
+  const files = summary?.changed_files ?? [];
+  const stat = summary?.diff_stat;
+
+  const copy = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(t(($) => $.detail.workdir_path_copied));
+    } catch {
+      toast.error(t(($) => $.detail.workdir_path_copy_failed));
+    }
+  };
+
+  return (
+    <div className="ml-7 rounded-md border border-border/60 bg-muted/20 px-2 py-2 text-xs">
+      <div className="mb-1 font-medium text-foreground">{t(($) => $.execution_log.code_changes_title)}</div>
+      {data.execution_workdir ? (
+        <div className="mb-1 flex items-center gap-1 text-muted-foreground">
+          <span>{t(($) => $.execution_log.execution_folder_label)}:</span>
+          <code className="truncate">{data.execution_workdir}</code>
+          <button
+            type="button"
+            onClick={() => void copy(data.execution_workdir!)}
+            className="rounded border border-border px-1 py-0.5 text-[11px] hover:bg-accent/50"
+          >
+            {t(($) => $.execution_log.copy_label)}
+          </button>
+        </div>
+      ) : null}
+      {summary?.git_branch ? (
+        <div className="mb-1 text-muted-foreground">
+          {t(($) => $.execution_log.branch_label)}: <code>{summary.git_branch}</code>
+          {summary.head_after ? <> · HEAD: <code>{summary.head_after.slice(0, 12)}</code></> : null}
+        </div>
+      ) : null}
+      {stat ? (
+        <div className="mb-1 text-muted-foreground">
+          {t(($) => $.execution_log.diff_stat_label)}: {stat.files_changed} files, +{stat.insertions}/-{stat.deletions}
+        </div>
+      ) : null}
+      {summary?.collect_status === "git_unavailable" ? (
+        <div className="text-muted-foreground">{t(($) => $.execution_log.git_unavailable)}</div>
+      ) : null}
+      {summary?.collect_status === "error" ? (
+        <div className="text-muted-foreground">{t(($) => $.execution_log.collect_error)}</div>
+      ) : null}
+      {summary?.collect_status === "truncated" ? (
+        <div className="mb-1 text-warning">{t(($) => $.execution_log.truncated_hint)}</div>
+      ) : null}
+      {summary && files.length === 0 && summary.collect_status === "ok" ? (
+        <div className="text-muted-foreground">{t(($) => $.execution_log.no_changes)}</div>
+      ) : null}
+      {files.length > 0 ? (
+        <ul className="max-h-40 space-y-0.5 overflow-auto pr-1">
+          {files.map((f, idx) => (
+            <li key={`${f.path}-${idx}`} className="flex items-center gap-1">
+              <code className="w-7 shrink-0 text-muted-foreground">{f.status}</code>
+              <code className="truncate">{f.path}</code>
+              <button
+                type="button"
+                onClick={() => void copy(f.path)}
+                className="rounded border border-border px-1 py-0.5 text-[11px] hover:bg-accent/50"
+              >
+                {t(($) => $.execution_log.copy_label)}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function extractTaskChangeData(result: unknown): TaskResultWithChanges | null {
+  if (!result) return null;
+  if (typeof result === "string") {
+    try {
+      const parsed = JSON.parse(result) as unknown;
+      return normalizeTaskResult(parsed);
+    } catch {
+      return null;
+    }
+  }
+  return normalizeTaskResult(result);
+}
+
+function normalizeTaskResult(input: unknown): TaskResultWithChanges | null {
+  if (!input || typeof input !== "object") return null;
+  const obj = input as Record<string, unknown>;
+  const execution_workdir =
+    typeof obj.execution_workdir === "string" ? obj.execution_workdir : undefined;
+  const summaryRaw = obj.change_summary;
+  let change_summary: ChangeSummary | undefined;
+  if (summaryRaw && typeof summaryRaw === "object") {
+    const s = summaryRaw as Record<string, unknown>;
+    const collect_status = s.collect_status;
+    if (
+      collect_status === "ok" ||
+      collect_status === "git_unavailable" ||
+      collect_status === "truncated" ||
+      collect_status === "error"
+    ) {
+      change_summary = {
+        collect_status,
+        git_branch: typeof s.git_branch === "string" ? s.git_branch : undefined,
+        head_before: typeof s.head_before === "string" ? s.head_before : undefined,
+        head_after: typeof s.head_after === "string" ? s.head_after : undefined,
+        changed_files: Array.isArray(s.changed_files)
+          ? s.changed_files
+              .map((item) => {
+                if (!item || typeof item !== "object") return null;
+                const it = item as Record<string, unknown>;
+                const path = typeof it.path === "string" ? it.path : "";
+                const status = typeof it.status === "string" ? it.status : "";
+                return path ? { path, status } : null;
+              })
+              .filter((v): v is ChangeFile => !!v)
+          : [],
+      };
+      const ds = s.diff_stat;
+      if (ds && typeof ds === "object") {
+        const d = ds as Record<string, unknown>;
+        if (
+          typeof d.files_changed === "number" &&
+          typeof d.insertions === "number" &&
+          typeof d.deletions === "number"
+        ) {
+          change_summary.diff_stat = {
+            files_changed: d.files_changed,
+            insertions: d.insertions,
+            deletions: d.deletions,
+          };
+        }
+      }
+    }
+  }
+  if (!execution_workdir && !change_summary) return null;
+  return { execution_workdir, change_summary };
 }

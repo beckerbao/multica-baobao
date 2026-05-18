@@ -2086,6 +2086,89 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 	}
 }
 
+func TestFailTask_PersistsExecutionWorkdirAndChangeSummaryInResult(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'fail-task-result-fixture', 'in_progress', 'none', $2, 'member', 81200, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, started_at
+		)
+		VALUES ($1, $2, $3, 'running', 0, now())
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	reqBody := map[string]any{
+		"error":             "agent crashed",
+		"execution_workdir": "/tmp/repo",
+		"change_summary": map[string]any{
+			"collect_status": "ok",
+			"git_branch":     "main",
+			"changed_files": []map[string]any{
+				{"path": "a.txt", "status": "M"},
+			},
+			"diff_stat": map[string]any{
+				"files_changed": 1,
+				"insertions":    3,
+				"deletions":     1,
+			},
+		},
+	}
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/fail", reqBody, testWorkspaceID, "legit-daemon")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("taskId", taskID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	testHandler.FailTask(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("FailTask: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var raw []byte
+	if err := testPool.QueryRow(ctx, `SELECT result FROM agent_task_queue WHERE id = $1`, taskID).Scan(&raw); err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+	if len(raw) == 0 {
+		t.Fatal("expected result payload to be persisted, got empty")
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if got, _ := decoded["execution_workdir"].(string); got != "/tmp/repo" {
+		t.Fatalf("execution_workdir=%q, want /tmp/repo", got)
+	}
+	if cs, ok := decoded["change_summary"].(map[string]any); !ok {
+		t.Fatalf("change_summary missing or invalid: %#v", decoded["change_summary"])
+	} else if got, _ := cs["collect_status"].(string); got != "ok" {
+		t.Fatalf("collect_status=%q, want ok", got)
+	}
+}
+
 type claimRuntimeGuardTask struct {
 	PriorSessionID string `json:"prior_session_id"`
 	PriorWorkDir   string `json:"prior_work_dir"`

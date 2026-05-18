@@ -291,6 +291,7 @@ UPDATE agent_task_queue
 SET status = 'failed',
     completed_at = now(),
     error = $2,
+    result = COALESCE(sqlc.narg('result'), result),
     failure_reason = COALESCE(sqlc.narg('failure_reason'), 'agent_error'),
     session_id = COALESCE(sqlc.narg('session_id'), session_id),
     work_dir = COALESCE(sqlc.narg('work_dir'), work_dir)

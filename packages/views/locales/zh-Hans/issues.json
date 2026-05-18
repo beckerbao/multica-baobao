@@ -232,7 +232,16 @@
     "status_running": "处理中",
     "status_completed": "已完成",
     "status_failed": "失败",
-    "status_cancelled": "已取消"
+    "status_cancelled": "已取消",
+    "code_changes_title": "代码变更",
+    "execution_folder_label": "执行目录",
+    "branch_label": "分支",
+    "diff_stat_label": "变更统计",
+    "git_unavailable": "该任务无法获取 Git 元数据。",
+    "collect_error": "收集 Git 元数据失败。",
+    "truncated_hint": "变更列表因大小限制被截断。",
+    "no_changes": "未检测到文件变更。",
+    "copy_label": "复制"
   },
   "terminate_dialog": {
     "title": "确定停止该 task？",
