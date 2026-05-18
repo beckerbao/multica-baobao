@@ -196,4 +196,29 @@ make dev
 
 `make dev` auto-detects your environment (main checkout or worktree), creates the env file, installs dependencies, sets up the database, runs migrations, and starts all services.
 
+### Use the local `multica` CLI from this source tree
+
+When you change CLI/daemon code in this repository, build and run the local CLI binary (instead of an older Homebrew install):
+
+```bash
+cd server
+go install ./cmd/multica
+export PATH="$HOME/go/bin:$PATH"
+hash -r
+```
+
+Verify you are using the local binary and that new commands are available:
+
+```bash
+which multica
+multica version
+multica project local-path --help
+```
+
+If a daemon is already running, restart it so runtime/prompt changes from your source build take effect:
+
+```bash
+multica daemon restart
+```
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development workflow, worktree support, testing, and troubleshooting.
