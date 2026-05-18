@@ -30,6 +30,7 @@ func BuildPrompt(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
+	appendPreferredWorkDirPrompt(&b, task.PreferredWorkDir)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "If you need comment history, `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). Pass `--since <RFC3339>` to fetch only comments newer than a known cursor.\n", task.IssueID)
 	return b.String()
@@ -115,6 +116,7 @@ func buildCommentPrompt(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
+	appendPreferredWorkDirPrompt(&b, task.PreferredWorkDir)
 	if task.TriggerCommentContent != "" {
 		authorLabel := "A user"
 		if task.TriggerAuthorType == "agent" {
@@ -196,4 +198,16 @@ func buildAutopilotPrompt(task Task) string {
 	}
 	b.WriteString("Do not run `multica issue get`; this run does not have an issue ID.\n")
 	return b.String()
+}
+
+func appendPreferredWorkDirPrompt(b *strings.Builder, preferredWorkDir string) {
+	dir := strings.TrimSpace(preferredWorkDir)
+	if dir == "" {
+		return
+	}
+	fmt.Fprintf(b, "Project root for this issue is fixed to: %s\n", dir)
+	b.WriteString("You MUST follow this startup sequence for this task:\n")
+	fmt.Fprintf(b, "Step 1: Run `cd %s` first.\n", dir)
+	b.WriteString("Step 2: Only after step 1 succeeds, proceed with issue analysis and implementation.\n")
+	b.WriteString("Run `pwd` once after `cd` and keep all project code operations in that directory.\n\n")
 }

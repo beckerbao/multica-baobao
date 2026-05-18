@@ -75,6 +75,22 @@
     "toast_removed": "已移除资源",
     "toast_remove_failed": "移除资源失败"
   },
+  "local_paths": {
+    "section_header": "本地路径",
+    "empty": "尚未配置 daemon 本地路径。",
+    "add_title": "设置 daemon 本地路径",
+    "daemon_placeholder": "选择 daemon",
+    "no_daemon_hint": "当前工作区没有可用 daemon_id 的 runtime。",
+    "path_placeholder": "/daemon/host/上的绝对路径",
+    "branch_placeholder": "可选分支提示（如 main）",
+    "save_button": "保存",
+    "remove_tooltip": "移除映射",
+    "branch_label": "分支",
+    "toast_saved": "本地路径映射已保存",
+    "toast_save_failed": "保存本地路径映射失败",
+    "toast_removed": "本地路径映射已移除",
+    "toast_remove_failed": "移除本地路径映射失败"
+  },
   "delete_dialog": {
     "title": "删除项目",
     "description": "将删除这个项目。issue 不会被删除，只会从项目中解除关联。",

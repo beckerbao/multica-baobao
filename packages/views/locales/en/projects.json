@@ -75,6 +75,22 @@
     "toast_removed": "Resource removed",
     "toast_remove_failed": "Failed to remove resource"
   },
+  "local_paths": {
+    "section_header": "Local Paths",
+    "empty": "No daemon-local paths configured.",
+    "add_title": "Set daemon local path",
+    "daemon_placeholder": "Select daemon",
+    "no_daemon_hint": "No runtime with daemon_id available in this workspace.",
+    "path_placeholder": "/absolute/path/on/daemon/host",
+    "branch_placeholder": "Optional branch hint (e.g. main)",
+    "save_button": "Save",
+    "remove_tooltip": "Remove mapping",
+    "branch_label": "Branch",
+    "toast_saved": "Local path mapping saved",
+    "toast_save_failed": "Failed to save local path mapping",
+    "toast_removed": "Local path mapping removed",
+    "toast_remove_failed": "Failed to remove local path mapping"
+  },
   "delete_dialog": {
     "title": "Delete project",
     "description": "This will delete the project. Issues will not be deleted but will be unlinked.",

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -2135,11 +2136,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 
 	reused := task.PriorWorkDir != "" && env.WorkDir == task.PriorWorkDir
+	execWorkDir, execWorkDirSource, execWorkDirReason := selectExecutionWorkDir(env.WorkDir, task.PreferredWorkDir)
 	taskLog.Info("starting agent",
 		"provider", provider,
 		"workdir", env.WorkDir,
 		"preferred_workdir", task.PreferredWorkDir,
 		"preferred_workdir_enabled", task.PreferredWorkDir != "",
+		"execution_workdir", execWorkDir,
+		"execution_workdir_source", execWorkDirSource,
+		"execution_workdir_reason", execWorkDirReason,
 		"model", entry.Model,
 		"reused", reused,
 	)
@@ -2173,7 +2178,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		model = entry.Model
 	}
 	execOpts := agent.ExecOptions{
-		Cwd:                       env.WorkDir,
+		Cwd:                       execWorkDir,
 		Model:                     model,
 		Timeout:                   d.cfg.AgentTimeout,
 		SemanticInactivityTimeout: d.cfg.CodexSemanticInactivityTimeout,
@@ -2355,6 +2360,46 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			FailureReason: failureReason,
 		}, nil
 	}
+}
+
+func selectExecutionWorkDir(defaultWorkDir, preferredWorkDir string) (string, string, string) {
+	if selected, reason, ok := validatePreferredWorkDir(preferredWorkDir); ok {
+		return selected, "preferred_workdir", reason
+	} else if strings.TrimSpace(preferredWorkDir) != "" {
+		return defaultWorkDir, "task_workdir_fallback", reason
+	}
+	return defaultWorkDir, "task_workdir", "preferred_workdir_not_set"
+}
+
+func validatePreferredWorkDir(preferredWorkDir string) (string, string, bool) {
+	path := filepath.Clean(strings.TrimSpace(preferredWorkDir))
+	if path == "" {
+		return "", "empty_path", false
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", "path_not_found", false
+		}
+		if os.IsPermission(err) {
+			return "", "permission_denied", false
+		}
+		return "", "stat_failed", false
+	}
+	if !info.IsDir() {
+		return "", "not_directory", false
+	}
+	if _, err := os.ReadDir(path); err != nil {
+		if os.IsPermission(err) {
+			return "", "permission_denied", false
+		}
+		return "", "readdir_failed", false
+	}
+	cmd := exec.Command("git", "-C", path, "rev-parse", "--is-inside-work-tree")
+	if err := cmd.Run(); err != nil {
+		return "", "not_git_repo", false
+	}
+	return path, "preferred_workdir_valid", true
 }
 
 // executeAndDrain runs a backend, drains its message stream (forwarding to the

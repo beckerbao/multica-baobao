@@ -37,7 +37,7 @@
 - [x] Thêm CLI command để set/get local path mapping theo project + daemon.
 - [x] Thêm output rõ daemon nào đang map path nào.
 - [x] Thêm cảnh báo khi path chưa tồn tại trên host.
-- [ ] (Optional) Thêm nút/config trong UI project settings.
+- [x] (Optional) Thêm nút/config trong UI project settings.
 
 ## 6. Security and Safety
 - [ ] Chặn path traversal/relative path nguy hiểm (`..`, symlink escape nếu cần).

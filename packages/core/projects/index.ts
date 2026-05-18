@@ -7,3 +7,9 @@ export {
   useCreateProjectResource,
   useDeleteProjectResource,
 } from "./resource-queries";
+export {
+  projectLocalPathKeys,
+  projectLocalPathsOptions,
+  useUpsertProjectLocalPath,
+  useDeleteProjectLocalPath,
+} from "./local-path-queries";
