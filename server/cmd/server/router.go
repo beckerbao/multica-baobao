@@ -390,6 +390,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/resources", h.ListProjectResources)
 					r.Get("/task-changes", h.ListProjectTaskChanges)
 					r.Get("/live-git-status", h.GetProjectLiveGitStatus)
+					r.Post("/git-actions", h.ProjectGitAction)
 					r.Post("/resources", h.CreateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
 					r.Get("/local-repo-paths", h.ListProjectLocalRepoPaths)

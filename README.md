@@ -222,3 +222,21 @@ multica daemon restart
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development workflow, worktree support, testing, and troubleshooting.
+
+### Project Git Actions (Phase 1 rollout)
+
+Project-level Git actions (`status`, `branch_list`, `fetch`, `pull --ff-only`, `checkout existing branch`) are protected by backend feature flags.
+
+Enable in local/dev:
+
+```bash
+export PROJECT_GIT_ACTIONS_PHASE1=true
+# optional stricter role gate (owner/admin only)
+export PROJECT_GIT_ACTIONS_REQUIRE_ADMIN=false
+```
+
+Or set them in `.env` before `make dev`.
+
+Notes:
+- Actions execute only inside the resolved project local path mapping.
+- Keep this disabled by default in shared environments until you validate logs/error categories on a dev workspace.

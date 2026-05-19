@@ -133,3 +133,48 @@ export interface ProjectLiveGitStatusResponse {
   diff_stat: LiveGitDiffStat;
   error?: string;
 }
+
+export type ProjectGitActionType =
+  | "status"
+  | "branch_list"
+  | "fetch"
+  | "pull_ff_only"
+  | "checkout_existing_branch";
+
+export interface ProjectGitActionRequest {
+  action: ProjectGitActionType;
+  branch?: string;
+}
+
+export interface ProjectGitStatusPayload {
+  branch: string;
+  head: string;
+  dirty: boolean;
+  staged_count: number;
+  unstaged_count: number;
+  untracked_count: number;
+  files_changed: number;
+  insertions: number;
+  deletions: number;
+}
+
+export interface ProjectGitBranchListPayload {
+  current: string;
+  branches: string[];
+}
+
+export interface ProjectGitActionResponse {
+  ok: boolean;
+  action: ProjectGitActionType | string;
+  project_id: string;
+  execution_workdir: string;
+  collect_status: string;
+  error_code?: string;
+  error_message?: string;
+  stdout?: string;
+  stderr?: string;
+  exit_code: number;
+  executed_at: string;
+  status?: ProjectGitStatusPayload;
+  branches?: ProjectGitBranchListPayload;
+}

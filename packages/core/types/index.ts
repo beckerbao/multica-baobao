@@ -70,6 +70,9 @@ export type {
   ListProjectLocalRepoPathsResponse,
   ProjectTaskChangesResponse,
   ProjectLiveGitStatusResponse,
+  ProjectGitActionRequest,
+  ProjectGitActionResponse,
+  ProjectGitActionType,
 } from "./project";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {

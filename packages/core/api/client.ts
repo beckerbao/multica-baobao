@@ -64,6 +64,8 @@ import type {
   ListProjectLocalRepoPathsResponse,
   ProjectTaskChangesResponse,
   ProjectLiveGitStatusResponse,
+  ProjectGitActionRequest,
+  ProjectGitActionResponse,
   Label,
   CreateLabelRequest,
   UpdateLabelRequest,
@@ -1233,6 +1235,16 @@ export class ApiClient {
     projectId: string,
   ): Promise<ProjectLiveGitStatusResponse> {
     return this.fetch(`/api/projects/${projectId}/live-git-status`);
+  }
+
+  async runProjectGitAction(
+    projectId: string,
+    data: ProjectGitActionRequest,
+  ): Promise<ProjectGitActionResponse> {
+    return this.fetch(`/api/projects/${projectId}/git-actions`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   }
 
   // Labels

@@ -4,11 +4,13 @@ import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Plus, Trash2, UserMinus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import type { AgentTask, Issue, IssueStatus, ProjectStatus, ProjectPriority } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions, projectLiveGitStatusOptions, projectTaskChangesOptions } from "@multica/core/projects/queries";
+import { api } from "@multica/core/api";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
@@ -216,6 +218,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
   const { data: projectTaskChanges = [] } = useQuery(projectTaskChangesOptions(wsId, projectId, 30));
   const { data: liveGitStatus } = useQuery(projectLiveGitStatusOptions(wsId, projectId));
+  const queryClient = useQueryClient();
   const groupedProjectTaskChanges = useMemo(() => {
     const groups = new Map<string, { label: string; tasks: AgentTask[] }>();
     const formatter = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" });
@@ -268,6 +271,60 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [descriptionOpen, setDescriptionOpen] = useState(true);
   const [changesOpen, setChangesOpen] = useState(true);
   const [liveGitOpen, setLiveGitOpen] = useState(true);
+  const [gitActionsOpen, setGitActionsOpen] = useState(true);
+  const [checkoutBranch, setCheckoutBranch] = useState("");
+  const [gitActionDetail, setGitActionDetail] = useState("");
+  const [gitBranches, setGitBranches] = useState<string[]>([]);
+  const [lastGitStatus, setLastGitStatus] = useState<{
+    dirty: boolean;
+    staged: number;
+    unstaged: number;
+    untracked: number;
+    branch: string;
+  } | null>(null);
+  const [lastGitActionAt, setLastGitActionAt] = useState<string>("");
+  const runGitActionMutation = useMutation({
+    mutationFn: (payload: { action: "status" | "branch_list" | "fetch" | "pull_ff_only" | "checkout_existing_branch"; branch?: string }) =>
+      api.runProjectGitAction(projectId, payload),
+    onSuccess: async (resp) => {
+      if (resp.ok) {
+        toast.success(`Git action "${resp.action}" completed`);
+      } else {
+        const errorMap: Record<string, string> = {
+          missing_local_path: t(($) => $.changes.live_missing_local_path),
+          not_git_repo: t(($) => $.changes.live_git_unavailable),
+          lock_busy: t(($) => $.changes.error_lock_busy),
+          branch_not_found: t(($) => $.changes.error_branch_not_found),
+          dirty_tree_overwrite_risk: t(($) => $.changes.error_dirty_tree),
+          timeout: t(($) => $.changes.error_timeout),
+          remote_auth_failed: t(($) => $.changes.error_remote_auth),
+          internal_error: t(($) => $.changes.error_internal),
+        };
+        toast.error(errorMap[resp.error_code || ""] || resp.error_message || `Git action "${resp.action}" failed`);
+      }
+      if (resp.branches && Array.isArray(resp.branches.branches)) {
+        setGitBranches(resp.branches.branches);
+      }
+      if (resp.status) {
+        setLastGitStatus({
+          dirty: !!resp.status.dirty,
+          staged: resp.status.staged_count ?? 0,
+          unstaged: resp.status.unstaged_count ?? 0,
+          untracked: resp.status.untracked_count ?? 0,
+          branch: resp.status.branch || "",
+        });
+      }
+      setLastGitActionAt(new Date().toLocaleTimeString());
+      setGitActionDetail(resp.stderr || resp.stdout || "");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["projects", wsId, "live-git-status", projectId] }),
+      ]);
+    },
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : "Failed to run git action";
+      toast.error(message);
+    },
+  });
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -546,6 +603,78 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       </div>
 
       {/* Resources */}
+      <div>
+        <button
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${gitActionsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setGitActionsOpen(!gitActionsOpen)}
+        >
+          {t(($) => $.changes.actions_section_header)}
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${gitActionsOpen ? "rotate-90" : ""}`} />
+        </button>
+        {gitActionsOpen && (
+          <div className="pl-2 space-y-2 text-xs">
+            {lastGitStatus ? (
+              <div className="rounded border border-border/60 px-2 py-1.5 text-xs text-muted-foreground">
+                <div>
+                  {lastGitStatus.dirty ? t(($) => $.changes.status_dirty) : t(($) => $.changes.status_clean)} ·
+                  {" "}{t(($) => $.changes.status_staged)}: {lastGitStatus.staged} ·
+                  {" "}{t(($) => $.changes.status_unstaged)}: {lastGitStatus.unstaged} ·
+                  {" "}{t(($) => $.changes.status_untracked)}: {lastGitStatus.untracked}
+                </div>
+                {lastGitActionAt ? <div>{t(($) => $.changes.last_refreshed)}: {lastGitActionAt}</div> : null}
+              </div>
+            ) : null}
+            <div className="flex flex-wrap gap-1">
+              <Button size="sm" variant="outline" disabled={runGitActionMutation.isPending} onClick={() => runGitActionMutation.mutate({ action: "status" })}>
+                {t(($) => $.changes.action_refresh_status)}
+              </Button>
+              <Button size="sm" variant="outline" disabled={runGitActionMutation.isPending} onClick={() => runGitActionMutation.mutate({ action: "branch_list" })}>
+                {t(($) => $.changes.action_refresh_branches)}
+              </Button>
+              <Button size="sm" variant="outline" disabled={runGitActionMutation.isPending} onClick={() => runGitActionMutation.mutate({ action: "fetch" })}>
+                {t(($) => $.changes.action_fetch)}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={runGitActionMutation.isPending}
+                onClick={() => {
+                  if (!confirm(t(($) => $.changes.confirm_pull))) return;
+                  runGitActionMutation.mutate({ action: "pull_ff_only" });
+                }}
+              >
+                {t(($) => $.changes.action_pull_ff_only)}
+              </Button>
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                className="h-8 rounded border px-2 bg-background text-xs"
+                value={checkoutBranch}
+                onChange={(e) => setCheckoutBranch(e.target.value)}
+              >
+                <option value="">{t(($) => $.changes.select_branch_placeholder)}</option>
+                {gitBranches.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={runGitActionMutation.isPending || !checkoutBranch}
+                onClick={() => {
+                  if (!confirm(t(($) => $.changes.confirm_checkout, { branch: checkoutBranch }))) return;
+                  runGitActionMutation.mutate({ action: "checkout_existing_branch", branch: checkoutBranch });
+                }}
+              >
+                {t(($) => $.changes.action_checkout)}
+              </Button>
+            </div>
+            {gitActionDetail ? (
+              <pre className="max-h-28 overflow-auto rounded border border-border/60 p-2 text-[11px] whitespace-pre-wrap">{gitActionDetail}</pre>
+            ) : null}
+          </div>
+        )}
+      </div>
       <div>
         <button
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${liveGitOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
