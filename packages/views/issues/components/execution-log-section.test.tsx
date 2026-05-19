@@ -156,4 +156,36 @@ describe("ExecutionLogSection code changes", () => {
     fireEvent.click(screen.getByText("Show past runs (1)"));
     expect(screen.getByText("Failed to collect git metadata.")).toBeTruthy();
   });
+
+  it("renders missing execution workdir state", async () => {
+    mockApi.listTasksByIssue.mockResolvedValueOnce([
+      makeTask("task-6", {
+        result: {
+          change_summary: { collect_status: "missing_execution_workdir", changed_files: [] },
+        },
+      }),
+    ]);
+    renderSection();
+    await waitFor(() => {
+      expect(screen.getByText("Show past runs (1)")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("Show past runs (1)"));
+    expect(screen.getByText("Missing execution workdir for this task.")).toBeTruthy();
+  });
+
+  it("does not infer code changes from free-form output text", async () => {
+    mockApi.listTasksByIssue.mockResolvedValueOnce([
+      makeTask("task-7", {
+        result: {
+          output: "Created files: a.txt, b.txt in /tmp/repo",
+        },
+      }),
+    ]);
+    renderSection();
+    await waitFor(() => {
+      expect(screen.getByText("Show past runs (1)")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("Show past runs (1)"));
+    expect(screen.queryByText("Code Changes")).toBeNull();
+  });
 });

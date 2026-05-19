@@ -244,6 +244,7 @@
     "diff_stat_label": "Diff stat",
     "git_unavailable": "Git metadata unavailable for this task.",
     "collect_error": "Failed to collect git metadata.",
+    "missing_execution_workdir": "Missing execution workdir for this task.",
     "truncated_hint": "Change list truncated due to size limits.",
     "no_changes": "No file changes detected.",
     "copy_label": "Copy"

@@ -510,6 +510,19 @@ SELECT * FROM agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC;
 
+-- name: ListTaskChangesByProject :many
+SELECT atq.*
+FROM agent_task_queue atq
+JOIN issue i ON i.id = atq.issue_id
+WHERE i.project_id = $1
+  AND atq.result IS NOT NULL
+  AND (
+    (atq.result::jsonb ? 'execution_workdir' AND COALESCE(atq.result::jsonb->>'execution_workdir', '') <> '')
+    OR (atq.result::jsonb ? 'change_summary')
+  )
+ORDER BY COALESCE(atq.completed_at, atq.created_at) DESC
+LIMIT $2;
+
 -- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()
 WHERE id = $1

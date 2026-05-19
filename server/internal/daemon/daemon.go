@@ -2155,6 +2155,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskLog.Info("resuming session", "session_id", task.PriorSessionID)
 	}
 
+	gitBaseline := captureTaskGitBaseline(execWorkDir)
+	if gitBaseline != nil {
+		if err := d.client.ReportTaskGitBaseline(ctx, task.ID, gitBaseline.ExecutionWorkDir, gitBaseline.BaselineHead, gitBaseline.BaselineBranch, gitBaseline.StartedAt); err != nil {
+			taskLog.Warn("report task git baseline failed", "error", err)
+		} else {
+			taskLog.Info("task git baseline captured",
+				"execution_workdir", gitBaseline.ExecutionWorkDir,
+				"baseline_head", gitBaseline.BaselineHead,
+				"baseline_branch", gitBaseline.BaselineBranch,
+			)
+		}
+	}
+
 	taskStart := time.Now()
 
 	var customArgs []string
@@ -2232,7 +2245,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 
 	elapsed := time.Since(taskStart).Round(time.Second)
-	changeSummary := collectTaskChangeSummary(execWorkDir)
+	baselineHead := ""
+	if gitBaseline != nil {
+		baselineHead = gitBaseline.BaselineHead
+	}
+	changeSummary := collectTaskChangeSummaryWithBaseline(execWorkDir, baselineHead)
 	if changeSummary != nil {
 		d.changeSummaryTotal.Add(1)
 		switch changeSummary.CollectStatus {

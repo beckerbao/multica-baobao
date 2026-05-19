@@ -1520,6 +1520,57 @@ func (h *Handler) ReportTaskProgress(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+type TaskGitBaselineRequest struct {
+	ExecutionWorkDir string `json:"execution_workdir"`
+	BaselineHead     string `json:"baseline_head,omitempty"`
+	BaselineBranch   string `json:"baseline_branch,omitempty"`
+	StartedAt        string `json:"started_at,omitempty"`
+}
+
+// ReportTaskGitBaseline persists the baseline snapshot captured at task start.
+func (h *Handler) ReportTaskGitBaseline(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	if !ok {
+		return
+	}
+
+	var req TaskGitBaselineRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	execDir := strings.TrimSpace(req.ExecutionWorkDir)
+	if execDir == "" {
+		writeError(w, http.StatusBadRequest, "execution_workdir is required")
+		return
+	}
+	startedAt := pgtype.Timestamptz{}
+	if ts := strings.TrimSpace(req.StartedAt); ts != "" {
+		if parsed, err := time.Parse(time.RFC3339, ts); err == nil {
+			startedAt = pgtype.Timestamptz{Time: parsed, Valid: true}
+		}
+	}
+	row, err := h.Queries.UpsertTaskGitBaseline(r.Context(), db.UpsertTaskGitBaselineParams{
+		TaskID:          task.ID,
+		ExecutionWorkdir: execDir,
+		BaselineHead:    strToText(strings.TrimSpace(req.BaselineHead)),
+		BaselineBranch:  strToText(strings.TrimSpace(req.BaselineBranch)),
+		StartedAt:       startedAt,
+	})
+	if err != nil {
+		slog.Warn("task git baseline upsert failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to persist task git baseline")
+		return
+	}
+	slog.Info("task git baseline stored",
+		"task_id", taskID,
+		"execution_workdir", execDir,
+		"baseline_head", row.BaselineHead.String,
+	)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 // CompleteTask marks a running task as completed.
 type TaskCompleteRequest struct {
 	PRURL            string          `json:"pr_url"`

@@ -91,6 +91,23 @@
     "toast_removed": "本地路径映射已移除",
     "toast_remove_failed": "移除本地路径映射失败"
   },
+  "changes": {
+    "section_header": "项目变更",
+    "live_section_header": "仓库实时状态",
+    "empty": "还没有任务运行产生的变更快照。请在该项目下运行一个 issue 任务后再查看。",
+    "note_task_snapshot_only": "这里显示的是 agent 任务运行时采集的 Git 变更快照，不是仓库实时状态。",
+    "live_loading": "正在加载仓库实时状态...",
+    "live_no_changes": "当前没有文件变更。",
+    "live_missing_local_path": "该项目尚未配置本地路径。",
+    "live_git_unavailable": "配置的本地路径不是 Git 仓库。",
+    "live_collect_error": "采集仓库实时状态失败。",
+    "execution_dir": "执行目录",
+    "collect_status": "采集状态",
+    "changed_files": "变更文件数",
+    "missing_execution_workdir": "缺少 execution workdir",
+    "unknown_day": "未知日期",
+    "more_items": "还有 {{count}} 个任务"
+  },
   "delete_dialog": {
     "title": "删除项目",
     "description": "将删除这个项目。issue 不会被删除，只会从项目中解除关联。",

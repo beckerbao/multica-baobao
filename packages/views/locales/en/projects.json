@@ -91,6 +91,23 @@
     "toast_removed": "Local path mapping removed",
     "toast_remove_failed": "Failed to remove local path mapping"
   },
+  "changes": {
+    "section_header": "Project Changes",
+    "live_section_header": "Live Repo Status",
+    "empty": "No task-run change snapshot yet. Run an issue task in this project to capture changes.",
+    "note_task_snapshot_only": "Shows Git change snapshots captured from agent task runs, not live repository status.",
+    "live_loading": "Loading live repository status...",
+    "live_no_changes": "No current file changes.",
+    "live_missing_local_path": "No local path configured for this project.",
+    "live_git_unavailable": "Configured local path is not a Git repository.",
+    "live_collect_error": "Failed to collect live Git status.",
+    "execution_dir": "Execution dir",
+    "collect_status": "Collect status",
+    "changed_files": "Changed files",
+    "missing_execution_workdir": "missing execution workdir",
+    "unknown_day": "Unknown day",
+    "more_items": "+{{count}} more tasks"
+  },
   "delete_dialog": {
     "title": "Delete project",
     "description": "This will delete the project. Issues will not be deleted but will be unlinked.",

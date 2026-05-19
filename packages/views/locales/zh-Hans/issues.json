@@ -239,6 +239,7 @@
     "diff_stat_label": "变更统计",
     "git_unavailable": "该任务无法获取 Git 元数据。",
     "collect_error": "收集 Git 元数据失败。",
+    "missing_execution_workdir": "该任务缺少 execution workdir。",
     "truncated_hint": "变更列表因大小限制被截断。",
     "no_changes": "未检测到文件变更。",
     "copy_label": "复制"

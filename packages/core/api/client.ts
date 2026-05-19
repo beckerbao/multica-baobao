@@ -62,6 +62,8 @@ import type {
   ProjectLocalRepoPath,
   UpsertProjectLocalRepoPathRequest,
   ListProjectLocalRepoPathsResponse,
+  ProjectTaskChangesResponse,
+  ProjectLiveGitStatusResponse,
   Label,
   CreateLabelRequest,
   UpdateLabelRequest,
@@ -1216,6 +1218,21 @@ export class ApiClient {
     await this.fetch(`/api/projects/${projectId}/local-repo-paths/${encodeURIComponent(daemonId)}`, {
       method: "DELETE",
     });
+  }
+
+  async listProjectTaskChanges(
+    projectId: string,
+    params?: { limit?: number },
+  ): Promise<ProjectTaskChangesResponse> {
+    const search = new URLSearchParams();
+    if (params?.limit) search.set("limit", String(params.limit));
+    return this.fetch(`/api/projects/${projectId}/task-changes?${search}`);
+  }
+
+  async getProjectLiveGitStatus(
+    projectId: string,
+  ): Promise<ProjectLiveGitStatusResponse> {
+    return this.fetch(`/api/projects/${projectId}/live-git-status`);
   }
 
   // Labels

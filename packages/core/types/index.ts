@@ -68,6 +68,8 @@ export type {
   ProjectLocalRepoPath,
   UpsertProjectLocalRepoPathRequest,
   ListProjectLocalRepoPathsResponse,
+  ProjectTaskChangesResponse,
+  ProjectLiveGitStatusResponse,
 } from "./project";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {

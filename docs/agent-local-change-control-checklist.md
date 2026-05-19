@@ -95,3 +95,57 @@
 - [x] User thấy rõ task chạy ở folder nào (`execution_workdir`).
 - [x] Nếu không thu thập được git info, task vẫn hoàn thành bình thường và có reason rõ ràng.
 - [x] Không có regression trên luồng task hiện tại (claim/execute/complete/fail).
+
+## 11. Next Scope (Project-Level Git Source of Truth)
+- [x] Chốt nguyên tắc: **không phụ thuộc agent output/prompt** để hiển thị file change.
+- [x] Nguồn dữ liệu duy nhất cho "Code Changes" là Git command chạy phía daemon trên `execution_workdir`.
+- [x] Nếu task không có `execution_workdir` hợp lệ: trả trạng thái `missing_execution_workdir` (không dùng text từ agent để suy luận).
+
+## 12. Backend Plan (Authoritative Git Delta)
+- [x] Bổ sung snapshot mốc đầu task:
+  - [x] `task_git_baseline` gồm `task_id`, `execution_workdir`, `baseline_head`, `baseline_branch`, `started_at`.
+  - [x] Ghi baseline ngay sau khi daemon resolve xong `execution_workdir` và trước khi execute agent.
+- [x] Bổ sung collector delta theo baseline ở cuối task:
+  - [x] Nếu `baseline_head` tồn tại: dùng `git diff --name-status <baseline_head>..HEAD`.
+  - [x] Cộng thêm untracked từ `git status --porcelain` để không mất file mới chưa add.
+  - [x] Trả `collect_status=ok|git_unavailable|truncated|error|missing_execution_workdir`.
+- [x] Lưu payload kết quả chuẩn hoá vào `agent_task_queue.result`:
+  - [x] `execution_workdir` luôn phải có khi task chạy local-path thành công.
+  - [x] `change_summary` luôn có `collect_status` (kể cả khi lỗi).
+
+## 13. Frontend Plan (Task + Project Level)
+- [x] Task level:
+  - [x] Block "Code Changes" chỉ render từ `result.change_summary` (không đọc/parse text output).
+  - [x] Hiển thị rõ badge trạng thái mới `missing_execution_workdir`.
+- [x] Project level:
+  - [x] Thêm tab/panel "Project Changes" trong project detail.
+  - [x] API trả danh sách task gần nhất có `execution_workdir` + `change_summary`.
+  - [x] Group theo ngày/task để user kiểm soát thay đổi toàn project.
+
+## 14. Verification Gates (Must Pass)
+- [x] E2E local-path run:
+  - [x] Task tạo file trong repo local-path. (covered by `TestCollectTaskChangeSummaryWithBaseline_UsesBaselineDelta`)
+  - [x] `issue runs` có `execution_workdir=<local_path>` và `change_summary.collect_status=ok`. (covered by `TestListTasksByIssue_IncludesExecutionWorkdirAndChangeSummary`)
+  - [x] UI task hiển thị file changed không dựa vào text output.
+- [x] E2E non-git path:
+  - [x] `collect_status=git_unavailable`, task vẫn complete/fail bình thường.
+- [x] Regression:
+  - [x] Không ảnh hưởng flow claim/execute/complete/fail.
+  - [x] Automated checks pass: `go test ./internal/daemon ./internal/handler ./internal/service`, `pnpm -C packages/core typecheck`, `pnpm -C packages/views typecheck`, `pnpm -C packages/views test -- execution-log-section.test.tsx`.
+  - [x] Baseline delta check pass: `go test ./internal/daemon -run TestCollectTaskChangeSummaryWithBaseline_UsesBaselineDelta -count=1`.
+
+## 15. Phase 2 - Live Repo Status (Project View)
+- [x] Scope: thêm "Live Repo Status" để thấy trạng thái git hiện tại của local path (không phụ thuộc task run metadata).
+- [ ] Backend API:
+  - [x] Thêm endpoint `GET /api/projects/{id}/live-git-status`.
+  - [x] Resolve từ `project_local_repo_path` (ưu tiên mapping mới nhất).
+  - [x] Trả `collect_status=ok|git_unavailable|error|missing_local_path`.
+  - [x] Trả `changed_files` + `diff_stat` + `git_branch` + `head_after` + `execution_workdir`.
+- [ ] Frontend:
+  - [x] Gọi API mới ở Project Detail.
+  - [x] Render block "Live Repo Status" tách biệt với "Project Changes (task snapshots)".
+  - [x] Empty/error states rõ nghĩa (missing mapping / non-git / command error).
+- [ ] Tests:
+  - [x] Handler test: repo git có file changed/untracked -> trả `ok` + file list.
+  - [x] Handler test: path không phải git -> `git_unavailable`.
+  - [x] Typecheck + targeted tests pass.

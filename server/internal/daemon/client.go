@@ -156,6 +156,22 @@ func (c *Client) StartTask(ctx context.Context, taskID string) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/start", taskID), map[string]any{}, nil)
 }
 
+func (c *Client) ReportTaskGitBaseline(ctx context.Context, taskID, executionWorkDir, baselineHead, baselineBranch string, startedAt time.Time) error {
+	body := map[string]any{
+		"execution_workdir": executionWorkDir,
+	}
+	if baselineHead != "" {
+		body["baseline_head"] = baselineHead
+	}
+	if baselineBranch != "" {
+		body["baseline_branch"] = baselineBranch
+	}
+	if !startedAt.IsZero() {
+		body["started_at"] = startedAt.UTC().Format(time.RFC3339)
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/git-baseline", taskID), body, nil)
+}
+
 func (c *Client) ReportProgress(ctx context.Context, taskID, summary string, step, total int) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/progress", taskID), map[string]any{
 		"summary": summary,

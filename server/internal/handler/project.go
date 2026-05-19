@@ -7,6 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -100,6 +102,28 @@ type UpdateProjectRequest struct {
 	LeadID      *string `json:"lead_id"`
 }
 
+type LiveGitChangedFile struct {
+	Path   string `json:"path"`
+	Status string `json:"status"`
+}
+
+type LiveGitDiffStat struct {
+	FilesChanged int `json:"files_changed"`
+	Insertions   int `json:"insertions"`
+	Deletions    int `json:"deletions"`
+}
+
+type ProjectLiveGitStatusResponse struct {
+	ProjectID        string               `json:"project_id"`
+	ExecutionWorkDir string               `json:"execution_workdir"`
+	CollectStatus    string               `json:"collect_status"` // ok | git_unavailable | error | missing_local_path
+	GitBranch        string               `json:"git_branch,omitempty"`
+	HeadAfter        string               `json:"head_after,omitempty"`
+	ChangedFiles     []LiveGitChangedFile `json:"changed_files"`
+	DiffStat         LiveGitDiffStat      `json:"diff_stat"`
+	Error            string               `json:"error,omitempty"`
+}
+
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
@@ -180,6 +204,215 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ListProjectTaskChanges returns recent tasks for this project that have
+// execution_workdir and/or change_summary metadata.
+func (h *Handler) ListProjectTaskChanges(w http.ResponseWriter, r *http.Request) {
+	project, ok := h.loadProjectForResource(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	limit := int32(50)
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 200 {
+			limit = int32(n)
+		}
+	}
+	rows, err := h.Queries.ListTaskChangesByProject(r.Context(), db.ListTaskChangesByProjectParams{
+		ProjectID: project.ID,
+		Limit:     limit,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list project task changes")
+		return
+	}
+	resp := make([]AgentTaskResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = taskToResponse(row)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":  resp,
+		"total":  len(resp),
+		"limit":  limit,
+		"project_id": uuidToString(project.ID),
+	})
+}
+
+// GetProjectLiveGitStatus returns current git status from the project's
+// configured local path (daemon-host path), independent from task snapshots.
+func (h *Handler) GetProjectLiveGitStatus(w http.ResponseWriter, r *http.Request) {
+	project, ok := h.loadProjectForResource(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	rows, err := h.Queries.ListProjectLocalRepoPathsByProject(r.Context(), project.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list project local paths")
+		return
+	}
+	if len(rows) == 0 {
+		writeJSON(w, http.StatusOK, ProjectLiveGitStatusResponse{
+			ProjectID:        uuidToString(project.ID),
+			CollectStatus:    "missing_local_path",
+			ExecutionWorkDir: "",
+			ChangedFiles:     []LiveGitChangedFile{},
+			DiffStat:         LiveGitDiffStat{},
+		})
+		return
+	}
+	selected := rows[0]
+	for _, row := range rows[1:] {
+		if row.UpdatedAt.Time.After(selected.UpdatedAt.Time) {
+			selected = row
+		}
+	}
+	workDir := strings.TrimSpace(selected.LocalPath)
+	workDir = filepath.Clean(workDir)
+	if workDir == "." || workDir == "" {
+		writeJSON(w, http.StatusOK, ProjectLiveGitStatusResponse{
+			ProjectID:        uuidToString(project.ID),
+			CollectStatus:    "missing_local_path",
+			ExecutionWorkDir: "",
+			ChangedFiles:     []LiveGitChangedFile{},
+			DiffStat:         LiveGitDiffStat{},
+		})
+		return
+	}
+	// git availability check
+	if _, err := runGitCommand(workDir, "rev-parse", "--is-inside-work-tree"); err != nil {
+		writeJSON(w, http.StatusOK, ProjectLiveGitStatusResponse{
+			ProjectID:        uuidToString(project.ID),
+			CollectStatus:    "git_unavailable",
+			ExecutionWorkDir: workDir,
+			ChangedFiles:     []LiveGitChangedFile{},
+			DiffStat:         LiveGitDiffStat{},
+		})
+		return
+	}
+	branch, branchErr := runGitCommand(workDir, "branch", "--show-current")
+	head, headErr := runGitCommand(workDir, "rev-parse", "HEAD")
+	nameStatus, diffErr := runGitCommand(workDir, "diff", "--name-status")
+	shortStat, statErr := runGitCommand(workDir, "diff", "--shortstat")
+	porcelain, porErr := runGitCommand(workDir, "status", "--porcelain")
+	if diffErr != nil || statErr != nil || porErr != nil {
+		writeJSON(w, http.StatusOK, ProjectLiveGitStatusResponse{
+			ProjectID:        uuidToString(project.ID),
+			CollectStatus:    "error",
+			ExecutionWorkDir: workDir,
+			ChangedFiles:     []LiveGitChangedFile{},
+			DiffStat:         LiveGitDiffStat{},
+			Error:            "failed to collect git status",
+		})
+		return
+	}
+	changed := mergeLiveGitFiles(parseLiveNameStatus(nameStatus), parseLivePorcelain(porcelain))
+	resp := ProjectLiveGitStatusResponse{
+		ProjectID:        uuidToString(project.ID),
+		ExecutionWorkDir: workDir,
+		CollectStatus:    "ok",
+		GitBranch:        strings.TrimSpace(branch),
+		HeadAfter:        strings.TrimSpace(head),
+		ChangedFiles:     changed,
+		DiffStat:         parseLiveShortStat(shortStat),
+	}
+	if branchErr != nil {
+		resp.GitBranch = ""
+	}
+	if headErr != nil {
+		resp.HeadAfter = ""
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func runGitCommand(workDir string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", workDir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func parseLiveNameStatus(raw string) []LiveGitChangedFile {
+	lines := strings.Split(raw, "\n")
+	out := make([]LiveGitChangedFile, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		out = append(out, LiveGitChangedFile{
+			Status: strings.TrimSpace(parts[0]),
+			Path:   strings.TrimSpace(parts[1]),
+		})
+	}
+	return out
+}
+
+func parseLivePorcelain(raw string) []LiveGitChangedFile {
+	lines := strings.Split(raw, "\n")
+	out := make([]LiveGitChangedFile, 0, len(lines))
+	for _, line := range lines {
+		if len(line) < 3 {
+			continue
+		}
+		status := strings.TrimSpace(line[:2])
+		path := strings.TrimSpace(line[3:])
+		if status == "" || path == "" {
+			continue
+		}
+		out = append(out, LiveGitChangedFile{Status: status, Path: path})
+	}
+	return out
+}
+
+func mergeLiveGitFiles(primary, secondary []LiveGitChangedFile) []LiveGitChangedFile {
+	out := make([]LiveGitChangedFile, 0, len(primary)+len(secondary))
+	seen := make(map[string]struct{}, len(primary)+len(secondary))
+	for _, item := range primary {
+		key := item.Status + "\x00" + item.Path
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, item)
+	}
+	for _, item := range secondary {
+		key := item.Status + "\x00" + item.Path
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+func parseLiveShortStat(raw string) LiveGitDiffStat {
+	stat := LiveGitDiffStat{}
+	parts := strings.Split(raw, ",")
+	for _, part := range parts {
+		segment := strings.TrimSpace(part)
+		fields := strings.Fields(segment)
+		if len(fields) < 2 {
+			continue
+		}
+		n, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		switch {
+		case strings.Contains(segment, "file"):
+			stat.FilesChanged = n
+		case strings.Contains(segment, "insertion"):
+			stat.Insertions = n
+		case strings.Contains(segment, "deletion"):
+			stat.Deletions = n
+		}
+	}
+	return stat
 }
 
 func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {

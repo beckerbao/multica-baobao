@@ -61,6 +61,13 @@ func TestCollectTaskChangeSummary_GitUnavailable(t *testing.T) {
 	}
 }
 
+func TestCollectTaskChangeSummary_MissingExecutionWorkdir(t *testing.T) {
+	got := collectTaskChangeSummary("")
+	if got == nil || got.CollectStatus != "missing_execution_workdir" {
+		t.Fatalf("collect_status=%v, want missing_execution_workdir", got)
+	}
+}
+
 func TestCollectTaskChangeSummary_OK(t *testing.T) {
 	dir := t.TempDir()
 	mustGit(t, dir, "init")
@@ -128,6 +135,38 @@ func TestCollectTaskChangeSummary_Truncated(t *testing.T) {
 	}
 }
 
+func TestCollectTaskChangeSummaryWithBaseline_UsesBaselineDelta(t *testing.T) {
+	dir := t.TempDir()
+	mustGit(t, dir, "init")
+	mustWrite(t, filepath.Join(dir, "a.txt"), "v1\n")
+	mustGit(t, dir, "add", ".")
+	mustGit(t, dir, "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-m", "init")
+	baseline := strings.TrimSpace(gitOutput(t, dir, "rev-parse", "HEAD"))
+
+	mustWrite(t, filepath.Join(dir, "a.txt"), "v2\n")
+	mustWrite(t, filepath.Join(dir, "b.txt"), "new\n")
+	mustGit(t, dir, "add", ".")
+	mustGit(t, dir, "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-m", "second")
+
+	// Untracked files should still appear via porcelain merge.
+	mustWrite(t, filepath.Join(dir, "c.txt"), "untracked\n")
+
+	got := collectTaskChangeSummaryWithBaseline(dir, baseline)
+	if got == nil {
+		t.Fatal("nil summary")
+	}
+	if got.CollectStatus != "ok" {
+		t.Fatalf("collect_status=%q, want ok", got.CollectStatus)
+	}
+	paths := map[string]bool{}
+	for _, f := range got.ChangedFiles {
+		paths[f.Path] = true
+	}
+	if !paths["a.txt"] || !paths["b.txt"] || !paths["c.txt"] {
+		t.Fatalf("changed_files missing expected paths: %+v", got.ChangedFiles)
+	}
+}
+
 func mustGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
@@ -135,6 +174,16 @@ func mustGit(t *testing.T, dir string, args ...string) {
 	if err != nil {
 		t.Fatalf("git %v: %v (%s)", args, err, string(out))
 	}
+}
+
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v (%s)", args, err, string(out))
+	}
+	return string(out)
 }
 
 func mustWrite(t *testing.T, path, content string) {

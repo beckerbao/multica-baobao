@@ -752,6 +752,196 @@ func TestListTasksByIssue_CrossWorkspace_Returns404(t *testing.T) {
 	}
 }
 
+// End-to-end (API level): daemon completes a task with structured git metadata,
+// then issue run history must expose that metadata verbatim (not inferred from
+// free-form output text).
+func TestListTasksByIssue_IncludesExecutionWorkdirAndChangeSummary(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'task-runs-change-summary', 'in_progress', 'none', $2, 'member', 91004, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at)
+		VALUES ($1, $2, $3, 'running', 0, now())
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	completeW := httptest.NewRecorder()
+	completeReq := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete", map[string]any{
+		"output":             "text output that should not drive code-change UI",
+		"execution_workdir":  "/Users/minhbaonguyen/Downloads/fe-tasklist",
+		"change_summary": map[string]any{
+			"collect_status": "ok",
+			"git_branch":     "main",
+			"changed_files": []map[string]any{
+				{"path": "test.md", "status": "A"},
+			},
+			"diff_stat": map[string]any{
+				"files_changed": 1,
+				"insertions":    1,
+				"deletions":     0,
+			},
+		},
+	}, testWorkspaceID, "legit-daemon")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("taskId", taskID)
+	completeReq = completeReq.WithContext(context.WithValue(completeReq.Context(), chi.RouteCtxKey, rctx))
+	testHandler.CompleteTask(completeW, completeReq)
+	if completeW.Code != http.StatusOK {
+		t.Fatalf("CompleteTask: expected 200, got %d: %s", completeW.Code, completeW.Body.String())
+	}
+
+	listW := httptest.NewRecorder()
+	listReq := newRequest("GET", "/api/issues/"+issueID+"/task-runs", nil)
+	listReq = withURLParam(listReq, "id", issueID)
+	testHandler.ListTasksByIssue(listW, listReq)
+	if listW.Code != http.StatusOK {
+		t.Fatalf("ListTasksByIssue: expected 200, got %d: %s", listW.Code, listW.Body.String())
+	}
+
+	var tasks []AgentTaskResponse
+	if err := json.NewDecoder(listW.Body).Decode(&tasks); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(tasks) == 0 {
+		t.Fatal("expected at least one task in issue run history")
+	}
+	var run *AgentTaskResponse
+	for i := range tasks {
+		if tasks[i].ID == taskID {
+			run = &tasks[i]
+			break
+		}
+	}
+	if run == nil {
+		t.Fatalf("task %s not found in run history", taskID)
+	}
+	resultMap, ok := run.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map[string]any", run.Result)
+	}
+	if got, _ := resultMap["execution_workdir"].(string); got != "/Users/minhbaonguyen/Downloads/fe-tasklist" {
+		t.Fatalf("execution_workdir=%q, want /Users/minhbaonguyen/Downloads/fe-tasklist", got)
+	}
+	changeSummary, ok := resultMap["change_summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("change_summary type = %T, want map[string]any", resultMap["change_summary"])
+	}
+	if got, _ := changeSummary["collect_status"].(string); got != "ok" {
+		t.Fatalf("collect_status=%q, want ok", got)
+	}
+}
+
+func TestListTasksByIssue_IncludesGitUnavailableStatus(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'task-runs-git-unavailable', 'in_progress', 'none', $2, 'member', 91005, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at)
+		VALUES ($1, $2, $3, 'running', 0, now())
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	failW := httptest.NewRecorder()
+	failReq := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/fail", map[string]any{
+		"error":             "repo is not a git worktree",
+		"execution_workdir": "/tmp/not-a-git-repo",
+		"change_summary": map[string]any{
+			"collect_status": "git_unavailable",
+			"changed_files":  []map[string]any{},
+		},
+	}, testWorkspaceID, "legit-daemon")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("taskId", taskID)
+	failReq = failReq.WithContext(context.WithValue(failReq.Context(), chi.RouteCtxKey, rctx))
+	testHandler.FailTask(failW, failReq)
+	if failW.Code != http.StatusOK {
+		t.Fatalf("FailTask: expected 200, got %d: %s", failW.Code, failW.Body.String())
+	}
+
+	listW := httptest.NewRecorder()
+	listReq := newRequest("GET", "/api/issues/"+issueID+"/task-runs", nil)
+	listReq = withURLParam(listReq, "id", issueID)
+	testHandler.ListTasksByIssue(listW, listReq)
+	if listW.Code != http.StatusOK {
+		t.Fatalf("ListTasksByIssue: expected 200, got %d: %s", listW.Code, listW.Body.String())
+	}
+
+	var tasks []AgentTaskResponse
+	if err := json.NewDecoder(listW.Body).Decode(&tasks); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(tasks) == 0 {
+		t.Fatal("expected at least one task in issue run history")
+	}
+	var run *AgentTaskResponse
+	for i := range tasks {
+		if tasks[i].ID == taskID {
+			run = &tasks[i]
+			break
+		}
+	}
+	if run == nil {
+		t.Fatalf("task %s not found in run history", taskID)
+	}
+	resultMap, ok := run.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map[string]any", run.Result)
+	}
+	changeSummary, ok := resultMap["change_summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("change_summary type = %T, want map[string]any", resultMap["change_summary"])
+	}
+	if got, _ := changeSummary["collect_status"].(string); got != "git_unavailable" {
+		t.Fatalf("collect_status=%q, want git_unavailable", got)
+	}
+}
+
 // TestGetIssueUsage_CrossWorkspace_Returns404 verifies that per-issue token
 // usage is not readable across workspaces via a bare issue UUID.
 func TestGetIssueUsage_CrossWorkspace_Returns404(t *testing.T) {
@@ -2166,6 +2356,86 @@ func TestFailTask_PersistsExecutionWorkdirAndChangeSummaryInResult(t *testing.T)
 		t.Fatalf("change_summary missing or invalid: %#v", decoded["change_summary"])
 	} else if got, _ := cs["collect_status"].(string); got != "ok" {
 		t.Fatalf("collect_status=%q, want ok", got)
+	}
+}
+
+func TestReportTaskGitBaseline_StoresBaselineRow(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS task_git_baseline (
+			task_id UUID PRIMARY KEY REFERENCES agent_task_queue(id) ON DELETE CASCADE,
+			execution_workdir TEXT NOT NULL DEFAULT '',
+			baseline_head TEXT,
+			baseline_branch TEXT,
+			started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)
+	`); err != nil {
+		t.Fatalf("setup: ensure task_git_baseline table: %v", err)
+	}
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'baseline-fixture', 'in_progress', 'none', $2, 'member', 81201, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at)
+		VALUES ($1, $2, $3, 'running', 0, now())
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/git-baseline", map[string]any{
+		"execution_workdir": "/tmp/repo",
+		"baseline_head":     "abc123",
+		"baseline_branch":   "main",
+		"started_at":        "2026-05-19T00:00:00Z",
+	}, testWorkspaceID, "legit-daemon")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("taskId", taskID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	testHandler.ReportTaskGitBaseline(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ReportTaskGitBaseline: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var (
+		execDir string
+		head    *string
+		branch  *string
+	)
+	if err := testPool.QueryRow(ctx, `
+		SELECT execution_workdir, baseline_head, baseline_branch
+		FROM task_git_baseline WHERE task_id = $1
+	`, taskID).Scan(&execDir, &head, &branch); err != nil {
+		t.Fatalf("read task_git_baseline: %v", err)
+	}
+	if execDir != "/tmp/repo" {
+		t.Fatalf("execution_workdir=%q, want /tmp/repo", execDir)
+	}
+	if head == nil || *head != "abc123" {
+		t.Fatalf("baseline_head=%v, want abc123", head)
+	}
+	if branch == nil || *branch != "main" {
+		t.Fatalf("baseline_branch=%v, want main", branch)
 	}
 }
 

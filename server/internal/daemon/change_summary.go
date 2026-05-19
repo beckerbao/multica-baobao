@@ -20,9 +20,14 @@ const (
 var shortStatRe = regexp.MustCompile(`(\d+)\s+files?\s+changed(?:,\s+(\d+)\s+insertions?\(\+\))?(?:,\s+(\d+)\s+deletions?\(-\))?`)
 
 func collectTaskChangeSummary(workDir string) *TaskChangeSummary {
+	return collectTaskChangeSummaryWithBaseline(workDir, "")
+}
+
+func collectTaskChangeSummaryWithBaseline(workDir, baselineHead string) *TaskChangeSummary {
 	summary := &TaskChangeSummary{CollectStatus: "error"}
 	workDir = strings.TrimSpace(workDir)
 	if workDir == "" {
+		summary.CollectStatus = "missing_execution_workdir"
 		return summary
 	}
 	workDir = filepath.Clean(workDir)
@@ -35,7 +40,11 @@ func collectTaskChangeSummary(workDir string) *TaskChangeSummary {
 
 	headBefore, _ := runGitCommand(workDir, "rev-parse", "HEAD")
 	branch, _ := runGitCommand(workDir, "rev-parse", "--abbrev-ref", "HEAD")
-	nameStatusRaw, err := runGitCommand(workDir, "diff", "--name-status")
+	nameStatusArgs := []string{"diff", "--name-status"}
+	if strings.TrimSpace(baselineHead) != "" {
+		nameStatusArgs = []string{"diff", "--name-status", strings.TrimSpace(baselineHead) + "..HEAD"}
+	}
+	nameStatusRaw, err := runGitCommand(workDir, nameStatusArgs...)
 	if err != nil {
 		summary.CollectStatus = "error"
 		return summary
@@ -45,12 +54,23 @@ func collectTaskChangeSummary(workDir string) *TaskChangeSummary {
 		summary.CollectStatus = "error"
 		return summary
 	}
-	shortStatWorktreeRaw, _ := runGitCommand(workDir, "diff", "--shortstat")
-	shortStatCachedRaw, _ := runGitCommand(workDir, "diff", "--cached", "--shortstat")
+	shortStatArgs := []string{"diff", "--shortstat"}
+	if strings.TrimSpace(baselineHead) != "" {
+		shortStatArgs = []string{"diff", "--shortstat", strings.TrimSpace(baselineHead) + "..HEAD"}
+	}
+	shortStatWorktreeRaw, _ := runGitCommand(workDir, shortStatArgs...)
+	shortStatCachedRaw := ""
+	if strings.TrimSpace(baselineHead) == "" {
+		shortStatCachedRaw, _ = runGitCommand(workDir, "diff", "--cached", "--shortstat")
+	}
 	headAfter, _ := runGitCommand(workDir, "rev-parse", "HEAD")
 
 	summary.GitBranch = strings.TrimSpace(branch)
-	summary.HeadBefore = strings.TrimSpace(headBefore)
+	if strings.TrimSpace(baselineHead) != "" {
+		summary.HeadBefore = strings.TrimSpace(baselineHead)
+	} else {
+		summary.HeadBefore = strings.TrimSpace(headBefore)
+	}
 	summary.HeadAfter = strings.TrimSpace(headAfter)
 	diffFiles := parseNameStatus(nameStatusRaw)
 	statusFiles := parsePorcelainStatus(statusRaw)
@@ -182,4 +202,26 @@ func estimateSummarySize(summary *TaskChangeSummary) int {
 		size += len(f.Path) + len(f.Status) + 16
 	}
 	return size
+}
+
+func captureTaskGitBaseline(workDir string) *TaskGitBaseline {
+	workDir = strings.TrimSpace(workDir)
+	if workDir == "" {
+		return nil
+	}
+	workDir = filepath.Clean(workDir)
+	if out, err := runGitCommand(workDir, "rev-parse", "--is-inside-work-tree"); err != nil || strings.TrimSpace(out) != "true" {
+		return &TaskGitBaseline{
+			ExecutionWorkDir: workDir,
+			StartedAt:        time.Now().UTC(),
+		}
+	}
+	head, _ := runGitCommand(workDir, "rev-parse", "HEAD")
+	branch, _ := runGitCommand(workDir, "rev-parse", "--abbrev-ref", "HEAD")
+	return &TaskGitBaseline{
+		ExecutionWorkDir: workDir,
+		BaselineHead:     strings.TrimSpace(head),
+		BaselineBranch:   strings.TrimSpace(branch),
+		StartedAt:        time.Now().UTC(),
+	}
 }

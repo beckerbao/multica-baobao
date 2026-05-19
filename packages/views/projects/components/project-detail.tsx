@@ -6,9 +6,9 @@ import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, 
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueStatus, ProjectStatus, ProjectPriority } from "@multica/core/types";
+import type { AgentTask, Issue, IssueStatus, ProjectStatus, ProjectPriority } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
-import { projectDetailOptions } from "@multica/core/projects/queries";
+import { projectDetailOptions, projectLiveGitStatusOptions, projectTaskChangesOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
@@ -214,6 +214,31 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const workspace = useCurrentWorkspace();
   const workspaceName = workspace?.name;
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
+  const { data: projectTaskChanges = [] } = useQuery(projectTaskChangesOptions(wsId, projectId, 30));
+  const { data: liveGitStatus } = useQuery(projectLiveGitStatusOptions(wsId, projectId));
+  const groupedProjectTaskChanges = useMemo(() => {
+    const groups = new Map<string, { label: string; tasks: AgentTask[] }>();
+    const formatter = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" });
+    for (const task of projectTaskChanges) {
+      const ts = task.completed_at || task.started_at || task.created_at;
+      const date = ts ? new Date(ts) : null;
+      const dayKey = date && !Number.isNaN(date.getTime())
+        ? date.toISOString().slice(0, 10)
+        : "unknown";
+      const label = date && !Number.isNaN(date.getTime())
+        ? formatter.format(date)
+        : t(($) => $.changes.unknown_day);
+      const entry = groups.get(dayKey);
+      if (entry) {
+        entry.tasks.push(task);
+      } else {
+        groups.set(dayKey, { label, tasks: [task] });
+      }
+    }
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([dayKey, value]) => ({ dayKey, ...value }));
+  }, [projectTaskChanges, t]);
   const projectScope = `project:${projectId}`;
   const projectFilter = useMemo<MyIssuesFilter>(
     () => ({ project_id: projectId }),
@@ -241,6 +266,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [progressOpen, setProgressOpen] = useState(true);
   const [descriptionOpen, setDescriptionOpen] = useState(true);
+  const [changesOpen, setChangesOpen] = useState(true);
+  const [liveGitOpen, setLiveGitOpen] = useState(true);
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -519,6 +546,113 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       </div>
 
       {/* Resources */}
+      <div>
+        <button
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${liveGitOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setLiveGitOpen(!liveGitOpen)}
+        >
+          {t(($) => $.changes.live_section_header)}
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${liveGitOpen ? "rotate-90" : ""}`} />
+        </button>
+        {liveGitOpen && (
+          <div className="pl-2 space-y-1 text-xs">
+            {liveGitStatus?.collect_status === "missing_local_path" ? (
+              <div className="text-muted-foreground">{t(($) => $.changes.live_missing_local_path)}</div>
+            ) : liveGitStatus?.collect_status === "git_unavailable" ? (
+              <div className="text-muted-foreground">{t(($) => $.changes.live_git_unavailable)}</div>
+            ) : liveGitStatus?.collect_status === "error" ? (
+              <div className="text-muted-foreground">{t(($) => $.changes.live_collect_error)}</div>
+            ) : liveGitStatus ? (
+              <>
+                <div className="text-muted-foreground truncate">
+                  {t(($) => $.changes.execution_dir)}: {liveGitStatus.execution_workdir || t(($) => $.changes.missing_execution_workdir)}
+                </div>
+                <div className="text-muted-foreground">
+                  {t(($) => $.changes.collect_status)}: {liveGitStatus.collect_status} · {t(($) => $.changes.changed_files)}: {liveGitStatus.changed_files?.length || 0}
+                </div>
+                {liveGitStatus.git_branch ? (
+                  <div className="text-muted-foreground truncate">
+                    Branch: {liveGitStatus.git_branch}
+                  </div>
+                ) : null}
+                {liveGitStatus.changed_files?.length ? (
+                  <div className="space-y-1">
+                    {liveGitStatus.changed_files.slice(0, 10).map((f) => (
+                      <div key={`${f.status}:${f.path}`} className="truncate">
+                        <span className="font-mono mr-1">{f.status}</span>
+                        <span>{f.path}</span>
+                      </div>
+                    ))}
+                    {liveGitStatus.changed_files.length > 10 ? (
+                      <div className="text-[11px] text-muted-foreground">
+                        {t(($) => $.changes.more_items, { count: liveGitStatus.changed_files.length - 10 })}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="text-muted-foreground">{t(($) => $.changes.live_no_changes)}</div>
+                )}
+              </>
+            ) : (
+              <div className="text-muted-foreground">{t(($) => $.changes.live_loading)}</div>
+            )}
+          </div>
+        )}
+      </div>
+      <div>
+        <button
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${changesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setChangesOpen(!changesOpen)}
+        >
+          {t(($) => $.changes.section_header)}
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${changesOpen ? "rotate-90" : ""}`} />
+        </button>
+        {changesOpen && (
+          <div className="pl-2 space-y-1">
+            <div className="text-[11px] text-muted-foreground">
+              {t(($) => $.changes.note_task_snapshot_only)}
+            </div>
+            {groupedProjectTaskChanges.length === 0 ? (
+              <div className="text-xs text-muted-foreground">{t(($) => $.changes.empty)}</div>
+            ) : (
+              groupedProjectTaskChanges.map((group) => (
+                <div key={group.dayKey} className="space-y-1.5">
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    {group.label}
+                  </div>
+                  {group.tasks.slice(0, 10).map((task) => {
+                    const result = (task.result && typeof task.result === "object")
+                      ? (task.result as Record<string, unknown>)
+                      : {};
+                    const execDir = typeof result.execution_workdir === "string" ? result.execution_workdir : "";
+                    const summary = result.change_summary && typeof result.change_summary === "object"
+                      ? (result.change_summary as Record<string, unknown>)
+                      : null;
+                    const collectStatus = typeof summary?.collect_status === "string" ? summary.collect_status : "";
+                    const changedFiles = Array.isArray(summary?.changed_files) ? summary?.changed_files.length : 0;
+                    return (
+                      <div key={task.id} className="rounded border border-border/60 px-2 py-1.5 text-xs">
+                        <div className="font-medium truncate">{task.trigger_summary || task.kind || task.id}</div>
+                        <div className="text-muted-foreground truncate">
+                          {t(($) => $.changes.execution_dir)}: {execDir || t(($) => $.changes.missing_execution_workdir)}
+                        </div>
+                        <div className="text-muted-foreground">
+                          {t(($) => $.changes.collect_status)}: {collectStatus || "n/a"} · {t(($) => $.changes.changed_files)}: {changedFiles}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {group.tasks.length > 10 ? (
+                    <div className="text-[11px] text-muted-foreground">
+                      {t(($) => $.changes.more_items, { count: group.tasks.length - 10 })}
+                    </div>
+                  ) : null}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
       <ProjectLocalPathSection projectId={projectId} />
       <ProjectResourcesSection projectId={projectId} />
     </div>

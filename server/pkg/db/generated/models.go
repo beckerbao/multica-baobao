@@ -488,6 +488,15 @@ type SkillFile struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type TaskGitBaseline struct {
+	TaskID           pgtype.UUID        `json:"task_id"`
+	ExecutionWorkdir string             `json:"execution_workdir"`
+	BaselineHead     pgtype.Text        `json:"baseline_head"`
+	BaselineBranch   pgtype.Text        `json:"baseline_branch"`
+	StartedAt        pgtype.Timestamptz `json:"started_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type TaskMessage struct {
 	ID        pgtype.UUID        `json:"id"`
 	TaskID    pgtype.UUID        `json:"task_id"`

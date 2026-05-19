@@ -104,3 +104,32 @@ export interface ListProjectLocalRepoPathsResponse {
   items: ProjectLocalRepoPath[];
   total: number;
 }
+
+export interface ProjectTaskChangesResponse {
+  project_id: string;
+  items: import("./agent").AgentTask[];
+  total: number;
+  limit: number;
+}
+
+export interface LiveGitChangedFile {
+  path: string;
+  status: string;
+}
+
+export interface LiveGitDiffStat {
+  files_changed: number;
+  insertions: number;
+  deletions: number;
+}
+
+export interface ProjectLiveGitStatusResponse {
+  project_id: string;
+  execution_workdir: string;
+  collect_status: "ok" | "git_unavailable" | "error" | "missing_local_path";
+  git_branch?: string;
+  head_after?: string;
+  changed_files: LiveGitChangedFile[];
+  diff_stat: LiveGitDiffStat;
+  error?: string;
+}

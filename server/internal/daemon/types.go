@@ -1,6 +1,9 @@
 package daemon
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
@@ -120,12 +123,19 @@ type TaskDiffStat struct {
 }
 
 type TaskChangeSummary struct {
-	CollectStatus string           `json:"collect_status"` // ok | git_unavailable | truncated | error
+	CollectStatus string           `json:"collect_status"` // ok | git_unavailable | truncated | error | missing_execution_workdir
 	GitBranch     string           `json:"git_branch,omitempty"`
 	HeadBefore    string           `json:"head_before,omitempty"`
 	HeadAfter     string           `json:"head_after,omitempty"`
 	ChangedFiles  []TaskChangeFile `json:"changed_files,omitempty"`
 	DiffStat      TaskDiffStat     `json:"diff_stat"`
+}
+
+type TaskGitBaseline struct {
+	ExecutionWorkDir string
+	BaselineHead     string
+	BaselineBranch   string
+	StartedAt        time.Time
 }
 
 // TaskResult is the outcome of executing a task.

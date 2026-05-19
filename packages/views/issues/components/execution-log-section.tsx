@@ -60,7 +60,12 @@ interface ExecutionLogSectionProps {
 type ChangeFile = { path: string; status: string };
 type DiffStat = { files_changed: number; insertions: number; deletions: number };
 type ChangeSummary = {
-  collect_status: "ok" | "git_unavailable" | "truncated" | "error";
+  collect_status:
+    | "ok"
+    | "git_unavailable"
+    | "truncated"
+    | "error"
+    | "missing_execution_workdir";
   git_branch?: string;
   head_before?: string;
   head_after?: string;
@@ -537,6 +542,9 @@ function CodeChangesSummary({ data }: { data: TaskResultWithChanges | null }) {
       {summary?.collect_status === "error" ? (
         <div className="text-muted-foreground">{t(($) => $.execution_log.collect_error)}</div>
       ) : null}
+      {summary?.collect_status === "missing_execution_workdir" ? (
+        <div className="text-muted-foreground">{t(($) => $.execution_log.missing_execution_workdir)}</div>
+      ) : null}
       {summary?.collect_status === "truncated" ? (
         <div className="mb-1 text-warning">{t(($) => $.execution_log.truncated_hint)}</div>
       ) : null}
@@ -591,7 +599,8 @@ function normalizeTaskResult(input: unknown): TaskResultWithChanges | null {
       collect_status === "ok" ||
       collect_status === "git_unavailable" ||
       collect_status === "truncated" ||
-      collect_status === "error"
+      collect_status === "error" ||
+      collect_status === "missing_execution_workdir"
     ) {
       change_summary = {
         collect_status,
